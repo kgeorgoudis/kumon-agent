@@ -1,0 +1,58 @@
+"""
+Runtime configuration.
+
+All tuneable values live here so callers never hard-code paths or URLs.
+Override any setting with the corresponding environment variable.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+# ── Repository layout ────────────────────────────────────────────────────────
+PROJECT_ROOT = Path(__file__).parent.parent
+DATA_DIR = PROJECT_ROOT / "data"
+OUTPUT_DIR = PROJECT_ROOT / "output"
+WORKSHEETS_DIR = OUTPUT_DIR / "worksheets"
+SUBMISSIONS_DIR = DATA_DIR / "submissions"
+TEMPLATES_DIR = Path(__file__).parent / "templates"
+
+# Create runtime directories if they don't exist yet.
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+WORKSHEETS_DIR.mkdir(parents=True, exist_ok=True)
+SUBMISSIONS_DIR.mkdir(parents=True, exist_ok=True)
+
+# ── Persistence ───────────────────────────────────────────────────────────────
+DB_PATH = DATA_DIR / "kumon.db"
+
+# ── Local LLM (OpenAI-compatible endpoint) ────────────────────────────────────
+# Constitutional Principle VIII: local-first.
+# The LLM runs locally; no data leaves the machine by default.
+LLM_BASE_URL: str = os.environ.get("KUMON_LLM_BASE_URL", "http://127.0.0.1:8000/v1")
+LLM_MODEL: str = os.environ.get("KUMON_LLM_MODEL", "Qwen3-8B-MLX-4bit")
+LLM_API_KEY: str = os.environ.get("KUMON_LLM_API_KEY", "local")  # local server ignores key
+LLM_TIMEOUT: float = float(os.environ.get("KUMON_LLM_TIMEOUT", "30"))
+
+# ── Worksheet defaults ────────────────────────────────────────────────────────
+DEFAULT_EXERCISE_COUNT: int = int(os.environ.get("KUMON_EXERCISE_COUNT", "15"))
+DEFAULT_LOCALE: str = "el-GR"
+DEFAULT_LANGUAGE: str = "el"
+
+# ── Default child profile (used when no explicit child is selected) ───────────
+DEFAULT_CHILD_ID: str = "default"
+DEFAULT_CHILD_NAME: str = os.environ.get("KUMON_CHILD_NAME", "Μαθητής")
+DEFAULT_CHILD_AGE: int = int(os.environ.get("KUMON_CHILD_AGE", "10"))
+DEFAULT_CHILD_GRADE: int = int(os.environ.get("KUMON_CHILD_GRADE", "4"))
+
+# ── OCR defaults ──────────────────────────────────────────────────────────────
+OCR_ENGINE: str = os.environ.get("KUMON_OCR_ENGINE", "hybrid")
+OCR_CONFIDENCE_THRESHOLD: float = float(os.environ.get("KUMON_OCR_CONFIDENCE_THRESHOLD", "0.80"))
+
+# Optional local vision fallback for low-confidence OCR fields.
+OCR_FALLBACK_ENABLED: bool = os.environ.get("KUMON_OCR_FALLBACK_ENABLED", "1") not in {"0", "false", "False"}
+OCR_FALLBACK_BASE_URL: str = os.environ.get("KUMON_OCR_FALLBACK_BASE_URL", LLM_BASE_URL)
+OCR_FALLBACK_MODEL: str = os.environ.get("KUMON_OCR_FALLBACK_MODEL", "shashikanth-a/Llama-3.2-11B-Vision-4bit")
+OCR_FALLBACK_API_KEY: str = os.environ.get("KUMON_OCR_FALLBACK_API_KEY", LLM_API_KEY)
+OCR_FALLBACK_TIMEOUT: float = float(os.environ.get("KUMON_OCR_FALLBACK_TIMEOUT", str(LLM_TIMEOUT)))
+

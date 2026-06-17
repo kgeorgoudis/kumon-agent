@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ title }}</title>
+  <style>
+    /* ── Reset ──────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* ── Base ───────────────────────────────────────────────── */
+    body {
+      font-family: 'Georgia', 'Times New Roman', serif;
+      font-size: 15px;
+      color: #111;
+      background: #fff;
+      padding: 24px 32px;
+      max-width: 860px;
+      margin: 0 auto;
+    }
+
+    /* ── Header ─────────────────────────────────────────────── */
+    .sheet-header {
+      border-bottom: 3px solid #2e7d32;
+      padding-bottom: 12px;
+      margin-bottom: 18px;
+    }
+    .sheet-title {
+      font-size: 26px;
+      font-weight: bold;
+      color: #2e7d32;
+      letter-spacing: 0.5px;
+    }
+    .sheet-meta {
+      display: flex;
+      gap: 32px;
+      margin-top: 10px;
+      font-size: 13px;
+      color: #444;
+    }
+    .sheet-meta span {
+      white-space: nowrap;
+    }
+    .sheet-meta .field-line {
+      display: inline-block;
+      width: 110px;
+      border-bottom: 1px solid #888;
+      vertical-align: bottom;
+      margin-left: 4px;
+    }
+
+    /* ── Instructions ───────────────────────────────────────── */
+    .instructions {
+      background: #f1f8e9;
+      border-left: 5px solid #66bb6a;
+      padding: 9px 14px;
+      margin-bottom: 22px;
+      font-size: 14px;
+      border-radius: 0 4px 4px 0;
+      color: #2e5c2e;
+      font-style: italic;
+    }
+
+    /* ── Exercise grid ───────────────────────────────────────── */
+    .exercises {
+      display: grid;
+      grid-template-columns: repeat({{ columns }}, 1fr);
+      gap: 14px 20px;
+    }
+    .exercise-cell {
+      position: relative;
+      border: 1.5px solid #c8e6c9;
+      border-radius: 8px;
+      padding: 18px 12px 14px 12px;
+      min-height: 72px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #fafffe;
+    }
+    .exercise-num {
+      position: absolute;
+      top: 5px;
+      left: 8px;
+      font-size: 10px;
+      color: #aaa;
+      font-style: normal;
+    }
+    .exercise-text {
+      font-size: 22px;
+      font-weight: bold;
+      letter-spacing: 1px;
+    }
+
+    /* ── Footer ─────────────────────────────────────────────── */
+    .sheet-footer {
+      margin-top: 28px;
+      text-align: center;
+      font-size: 13px;
+      color: #666;
+    }
+    .sheet-footer .cheer {
+      font-size: 18px;
+      margin-bottom: 4px;
+    }
+    .sheet-footer .id {
+      font-size: 10px;
+      color: #bbb;
+      font-family: monospace;
+    }
+
+    /* ── Print button (hidden when printing) ─────────────────── */
+    .print-bar {
+      margin-top: 28px;
+      text-align: center;
+    }
+    .print-btn {
+      background: #2e7d32;
+      color: #fff;
+      border: none;
+      padding: 10px 28px;
+      font-size: 15px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .print-btn:hover { background: #1b5e20; }
+
+    /* ── Print media ─────────────────────────────────────────── */
+    @page {
+      size: A4;
+      margin: 18mm 20mm;
+    }
+    @media print {
+      .print-bar { display: none; }
+      body { padding: 0; max-width: 100%; }
+      .exercise-cell { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="sheet-header">
+    <div class="sheet-title">📝 {{ title }}</div>
+    <div class="sheet-meta">
+      {% if child_name %}
+      <span>Μαθητής: <strong>{{ child_name }}</strong></span>
+      {% endif %}
+      <span>Ημερομηνία: <span class="field-line"></span></span>
+      <span>Χρόνος: <span class="field-line"></span> λεπτά</span>
+    </div>
+  </div>
+
+  <div class="instructions">{{ instructions }}</div>
+
+  <div class="exercises">
+    {% for ex in exercises %}
+    <div class="exercise-cell">
+      <span class="exercise-num">{{ loop.index }}.</span>
+      <span class="exercise-text">{{ ex.problem_text }}</span>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="sheet-footer">
+    <div class="cheer">Καλή επιτυχία! 🌟</div>
+    {% if micro_skill_meta %}
+    <div style="margin-top:4px; font-size:12px; color:#888;">
+      Δεξιότητα: {{ micro_skill_meta.name_el }} &nbsp;|&nbsp; Επίπεδο {{ micro_skill_meta.difficulty_level }}
+    </div>
+    {% endif %}
+    <div class="id">ID: {{ instance_id }}</div>
+  </div>
+
+  <div class="print-bar">
+    <button class="print-btn" onclick="window.print()">🖨️ Εκτύπωση</button>
+  </div>
+
+</body>
+</html>
+

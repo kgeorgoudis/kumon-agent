@@ -8,3 +8,28 @@ wheels/
 
 # Virtual environments
 .venv
+venv/
+
+# Runtime data
+data/
+output/worksheets/
+
+# Logs / env
+*.log
+.env*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+.idea/
+.vscode/
+
+# Keep directory stubs
+!data/.gitkeep
+!data/submissions/
+!data/submissions/.gitkeep
+!output/.gitkeep
+!output/worksheets/.gitkeep
+
