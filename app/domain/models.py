@@ -356,6 +356,18 @@ class ManualAnswerEntry(BaseModel):
     updated_at: datetime = Field(default_factory=_now)
 
 
+class PendingWorksheetRow(BaseModel):
+    """Read-model projection for worksheets that still need submission."""
+
+    instance_id: str
+    child_id: str | None = None
+    title_el: str
+    created_at: datetime
+    exercise_count: int = Field(ge=0)
+    has_draft_submission: bool = False
+    latest_draft_submission_id: str | None = None
+
+
 class ScoreResultSnapshot(BaseModel):
     """Immutable deterministic score record from reviewed OCR values."""
 
@@ -367,5 +379,3 @@ class ScoreResultSnapshot(BaseModel):
     accuracy_pct: float
     details_json: str
     created_at: datetime = Field(default_factory=_now)
-
-

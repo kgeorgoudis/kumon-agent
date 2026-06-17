@@ -22,7 +22,7 @@ from app.domain.models import (
     ManualEntryMode,
     ManualSubmission,
     ManualSubmissionStatus,
-    ScoreResultSnapshot,
+    PendingWorksheetRow,
 )
 from app.persistence.database import Database, default_db
 
@@ -348,6 +348,15 @@ def cancel_submission(submission_id: str, db: Database = default_db) -> None:
     db.update_manual_submission_status(submission_id, ManualSubmissionStatus.CANCELLED)
 
 
+def list_pending_worksheets(
+    child_id: str | None = None,
+    limit: int = 20,
+    db: Database = default_db,
+) -> list[PendingWorksheetRow]:
+    """Return worksheets that remain submittable (no confirmed submission yet)."""
+    return db.list_pending_worksheets(child_id=child_id, limit=limit)
+
+
 def confirm_and_score(
     submission_id: str,
     duration_seconds: int | None = None,
@@ -359,7 +368,6 @@ def confirm_and_score(
     """
     from app.services.scoring_service import (
         build_manual_submission_input_hash,
-        normalize_manual_entries,
     )
 
     submission = db.get_manual_submission(submission_id)
