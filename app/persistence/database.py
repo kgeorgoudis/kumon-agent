@@ -35,6 +35,7 @@ from app.domain.models import (
     OcrResult,
     OcrResultStatus,
     OcrValueSource,
+    PendingWorksheetRow,
     ScoreResultSnapshot,
     SubmissionStatus,
     WorksheetInstance,
@@ -403,6 +404,80 @@ class Database:
                 params,
             ).fetchall()
         return [_row_to_worksheet(r) for r in rows]
+
+    def list_pending_worksheets(
+        self,
+        child_id: str | None = None,
+        limit: int = 20,
+    ) -> list[PendingWorksheetRow]:
+        """Return worksheets that do not yet have a confirmed manual submission."""
+        clauses = [
+            """
+            NOT EXISTS (
+                SELECT 1
+                FROM manual_submissions msc
+                WHERE msc.instance_id = wi.instance_id
+                  AND msc.status = ?
+            )
+            """
+        ]
+        params: list[object] = [ManualSubmissionStatus.CONFIRMED.value]
+        if child_id is not None:
+            clauses.append("wi.child_id = ?")
+            params.append(child_id)
+        params.append(limit)
+
+        where_sql = " AND ".join(clause.strip() for clause in clauses)
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    wi.instance_id,
+                    wi.child_id,
+                    wi.title_el,
+                    wi.exercises_json,
+                    wi.created_at,
+                    EXISTS (
+                        SELECT 1
+                        FROM manual_submissions msd
+                        WHERE msd.instance_id = wi.instance_id
+                          AND msd.status = ?
+                    ) AS has_draft_submission,
+                    (
+                        SELECT msd.submission_id
+                        FROM manual_submissions msd
+                        WHERE msd.instance_id = wi.instance_id
+                          AND msd.status = ?
+                        ORDER BY msd.updated_at DESC, msd.created_at DESC
+                        LIMIT 1
+                    ) AS latest_draft_submission_id
+                FROM worksheet_instances wi
+                WHERE {where_sql}
+                ORDER BY wi.created_at DESC
+                LIMIT ?
+                """,
+                [
+                    ManualSubmissionStatus.DRAFT.value,
+                    ManualSubmissionStatus.DRAFT.value,
+                    *params,
+                ],
+            ).fetchall()
+
+        projections: list[PendingWorksheetRow] = []
+        for row in rows:
+            exercises = json.loads(row["exercises_json"])
+            projections.append(
+                PendingWorksheetRow(
+                    instance_id=row["instance_id"],
+                    child_id=row["child_id"],
+                    title_el=row["title_el"],
+                    created_at=datetime.fromisoformat(row["created_at"]),
+                    exercise_count=len(exercises),
+                    has_draft_submission=bool(row["has_draft_submission"]),
+                    latest_draft_submission_id=row["latest_draft_submission_id"],
+                )
+            )
+        return projections
 
     # ── OCR ingestion / review ────────────────────────────────────────────────
 

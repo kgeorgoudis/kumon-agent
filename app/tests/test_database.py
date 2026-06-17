@@ -10,6 +10,9 @@ import pytest
 
 from app.domain.models import (
     ChildProfile,
+    ManualEntryMode,
+    ManualSubmission,
+    ManualSubmissionStatus,
     MicroSkillId,
     OcrField,
     OcrResult,
@@ -181,3 +184,66 @@ def test_save_and_get_ocr_result_and_fields(db, tmp_output):
     corrected = db.get_ocr_fields(result.ocr_result_id)[1]
     assert corrected.corrected_value == "34"
     assert corrected.value_source == OcrValueSource.MANUAL
+
+
+def test_list_pending_worksheets_excludes_confirmed_submission(db, tmp_output):
+    ws_pending = generate_worksheet(MicroSkillId.ADDITION_SINGLE_DIGIT, count=2, seed=11)
+    ws_confirmed = generate_worksheet(MicroSkillId.ADDITION_SINGLE_DIGIT, count=2, seed=12)
+    db.save_worksheet_instance(ws_pending)
+    db.save_worksheet_instance(ws_confirmed)
+
+    confirmed_submission = ManualSubmission(
+        instance_id=ws_confirmed.instance_id,
+        entry_mode=ManualEntryMode.BULK,
+    )
+    db.save_manual_submission(confirmed_submission)
+    db.update_manual_submission_status(
+        confirmed_submission.submission_id,
+        ManualSubmissionStatus.CONFIRMED,
+    )
+
+    pending_rows = db.list_pending_worksheets()
+    ids = {row.instance_id for row in pending_rows}
+    assert ws_pending.instance_id in ids
+    assert ws_confirmed.instance_id not in ids
+
+
+def test_list_pending_worksheets_includes_draft_and_cancelled(db, tmp_output):
+    ws_draft = generate_worksheet(MicroSkillId.MULTIPLICATION_2_5, count=2, seed=13)
+    ws_cancelled = generate_worksheet(MicroSkillId.MULTIPLICATION_2_5, count=2, seed=14)
+    db.save_worksheet_instance(ws_draft)
+    db.save_worksheet_instance(ws_cancelled)
+
+    draft_submission = ManualSubmission(instance_id=ws_draft.instance_id)
+    cancelled_submission = ManualSubmission(instance_id=ws_cancelled.instance_id)
+    db.save_manual_submission(draft_submission)
+    db.save_manual_submission(cancelled_submission)
+    db.update_manual_submission_status(
+        cancelled_submission.submission_id,
+        ManualSubmissionStatus.CANCELLED,
+    )
+
+    pending_rows = db.list_pending_worksheets()
+    row_by_id = {row.instance_id: row for row in pending_rows}
+
+    assert ws_draft.instance_id in row_by_id
+    assert ws_cancelled.instance_id in row_by_id
+    assert row_by_id[ws_draft.instance_id].has_draft_submission is True
+    assert row_by_id[ws_draft.instance_id].latest_draft_submission_id == draft_submission.submission_id
+    assert row_by_id[ws_cancelled.instance_id].has_draft_submission is False
+
+
+def test_list_pending_worksheets_filters_by_child_id(db, tmp_output):
+    child_a = ChildProfile(child_id="child-a", display_name="Α", age=10, grade_level=4)
+    child_b = ChildProfile(child_id="child-b", display_name="Β", age=10, grade_level=4)
+    db.save_child_profile(child_a)
+    db.save_child_profile(child_b)
+
+    ws_a = generate_worksheet(MicroSkillId.ADDITION_SINGLE_DIGIT, child=child_a, count=2, seed=15)
+    ws_b = generate_worksheet(MicroSkillId.ADDITION_SINGLE_DIGIT, child=child_b, count=2, seed=16)
+    db.save_worksheet_instance(ws_a)
+    db.save_worksheet_instance(ws_b)
+
+    filtered = db.list_pending_worksheets(child_id=child_a.child_id)
+    assert [row.instance_id for row in filtered] == [ws_a.instance_id]
+

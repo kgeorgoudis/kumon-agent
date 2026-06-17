@@ -8,6 +8,8 @@ Usage examples
   kumon generate multiplication-2-5 --exercises 20 --child "Ελένη"
   kumon submit <instance_id>
   kumon submit <instance_id> --answers "2,4,6,8" --time 12:30
+  kumon pending
+  kumon pending --child "Ελένη"
   kumon list-skills
   kumon explain method
   kumon explain skill multiplication
@@ -54,6 +56,7 @@ from app.services.submission_service import (
     cancel_submission,
     confirm_and_score,
     get_review_summary,
+    list_pending_worksheets,
     parse_bulk_answers,
     parse_duration_to_seconds,
     resume_draft,
@@ -326,6 +329,55 @@ def history(
     console.print(table)
 
 
+@app.command()
+def pending(
+    child_name: Annotated[
+        Optional[str],
+        typer.Option("--child", "-c", help="Filter by child name."),
+    ] = None,
+    limit: Annotated[
+        int,
+        typer.Option("--limit", "-n", help="Number of records to show."),
+    ] = 20,
+) -> None:
+    """List worksheets that are pending manual submission."""
+    child_id: str | None = None
+    if child_name:
+        profile = _resolve_child(child_name, None)
+        child_id = profile.child_id if profile else None
+
+    rows = list_pending_worksheets(child_id=child_id, limit=limit, db=default_db)
+
+    if not rows:
+        if child_name:
+            console.print(
+                f"[yellow]Δεν υπάρχουν εκκρεμή φύλλα για υποβολή για το παιδί '{child_name}'.[/yellow]"
+            )
+        else:
+            console.print("[yellow]Δεν υπάρχουν εκκρεμή φύλλα για υποβολή.[/yellow]")
+        return
+
+    table = Table(title="Εκκρεμή Φύλλα για Υποβολή", show_header=True, header_style="bold magenta")
+    table.add_column("Ημερομηνία", style="dim")
+    table.add_column("Δεξιότητα")
+    table.add_column("Ασκήσεις", justify="right")
+    table.add_column("Πρόχειρο", justify="center")
+    table.add_column("Worksheet ID", style="cyan", no_wrap=True, overflow="ignore")
+
+    for row in rows:
+        date_str = row.created_at.strftime("%Y-%m-%d %H:%M")
+        draft_label = "Ναι" if row.has_draft_submission else "—"
+        table.add_row(
+            date_str,
+            row.title_el,
+            str(row.exercise_count),
+            draft_label,
+            row.instance_id,
+        )
+
+    console.print(table)
+
+
 
 def _format_duration(seconds: int) -> str:
     """Format integer seconds as MM:SS string."""
@@ -446,7 +498,6 @@ def submit(
                      for i in range(idx)] + [raw], db=default_db)
             except Exception:
                 # Fallback: upsert just this slot directly
-                from app.services.submission_service import update_single_answer
                 update_single_answer(submission.submission_id, idx, raw, db=default_db)
 
     # ── Review table ──────────────────────────────────────────────────────────
@@ -659,4 +710,3 @@ def explain_worksheet_types() -> None:
 
 if __name__ == "__main__":
     app()
-

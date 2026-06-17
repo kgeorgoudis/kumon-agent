@@ -58,6 +58,8 @@ Completed worksheets are now ingested manually by the parent (no OCR required).
 CLI flow:
 
 ```bash
+uv run kumon pending
+uv run kumon pending --child "Ελένη"
 uv run kumon submit <instance_id>
 uv run kumon submit <instance_id> --answers "1,2,3,4,5" --no-confirm
 uv run kumon submit <instance_id> --answers "1,2,3,4,5" --time 12:34 --no-confirm
@@ -65,6 +67,7 @@ uv run kumon submit <instance_id> --answers "1,2,3,4,5" --time 12:34 --no-confir
 
 Key behavior:
 
+- ✅ Recover worksheet IDs after terminal restart with `kumon pending`
 - ✅ Interactive one-by-one answer entry
 - ✅ Bulk answer entry with `--answers`
 - ✅ Review/correction loop before confirmation
@@ -91,6 +94,7 @@ Commands:
   generate              Generate a printable worksheet and its answer key
   list-skills           List all available micro-skills
   history               Show recent worksheets
+  pending               Show worksheets pending submission
   profile create        Create or update a child profile
   profile list          List saved profiles
   profile show          Show a profile's details
