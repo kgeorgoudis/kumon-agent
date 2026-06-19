@@ -60,6 +60,8 @@ CLI flow:
 ```bash
 uv run kumon pending
 uv run kumon pending --child "Ελένη"
+uv run kumon progress --child "Ελένη" --no-llm
+uv run kumon progress --child "Ελένη"
 uv run kumon submit <instance_id>
 uv run kumon submit <instance_id> --answers "1,2,3,4,5" --no-confirm
 uv run kumon submit <instance_id> --answers "1,2,3,4,5" --time 12:34 --no-confirm
@@ -68,6 +70,8 @@ uv run kumon submit <instance_id> --answers "1,2,3,4,5" --time 12:34 --no-confir
 Key behavior:
 
 - ✅ Recover worksheet IDs after terminal restart with `kumon pending`
+- ✅ Greek progress report with deterministic metrics via `kumon progress`
+- ✅ Optional LLM narrative + suggestions with graceful fallback
 - ✅ Interactive one-by-one answer entry
 - ✅ Bulk answer entry with `--answers`
 - ✅ Review/correction loop before confirmation
@@ -95,6 +99,7 @@ Commands:
   list-skills           List all available micro-skills
   history               Show recent worksheets
   pending               Show worksheets pending submission
+  progress              Show child progress summary and suggestions
   profile create        Create or update a child profile
   profile list          List saved profiles
   profile show          Show a profile's details
@@ -219,6 +224,18 @@ uv run pytest -v                 # verbose
 uv run pytest app/tests/test_math_engine.py -v   # specific file
 uv run pytest --cov             # with coverage report
 ```
+
+## Web Progress Page
+
+Once the API server is running, open:
+
+```bash
+http://127.0.0.1:8000/progress
+http://127.0.0.1:8000/progress?child=Ελένη
+http://127.0.0.1:8000/progress?child=Ελένη&llm=false
+```
+
+The page uses the same shared service payload as `kumon progress`.
 
 ### Test Coverage Summary (v0.1.0)
 

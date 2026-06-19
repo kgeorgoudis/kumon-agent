@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="el">
+  <head>
+    <meta charset="utf-8" />
+    <title>Αναφορά Προόδου</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 2rem; color: #1f2937; }
+      h1 { margin-bottom: 0.5rem; }
+      .muted { color: #6b7280; }
+      .cards { display: flex; gap: 1rem; margin: 1rem 0; }
+      .card { border: 1px solid #d1d5db; border-radius: 8px; padding: 0.8rem 1rem; min-width: 180px; }
+      .warn { background: #fff7ed; border: 1px solid #fdba74; padding: 0.8rem; border-radius: 8px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+      th, td { border: 1px solid #e5e7eb; padding: 0.5rem; text-align: left; }
+      th { background: #f9fafb; }
+      ul { margin-top: 0.5rem; }
+    </style>
+  </head>
+  <body>
+    <h1>Αναφορά Προόδου</h1>
+    <p class="muted">Παιδί: {{ report.child_display_name }}</p>
+
+    {% if is_empty %}
+      <p>Δεν υπάρχουν ακόμη βαθμολογημένα φύλλα για αναφορά προόδου.</p>
+    {% else %}
+      <p class="muted">
+        Περίοδος: {{ report.date_from.strftime('%Y-%m-%d') if report.date_from else '-' }}
+        έως {{ report.date_to.strftime('%Y-%m-%d') if report.date_to else '-' }}
+      </p>
+
+      <div class="cards">
+        <div class="card">
+          <strong>Φύλλα</strong>
+          <div>{{ report.worksheet_count }}</div>
+        </div>
+        <div class="card">
+          <strong>Συνολική ακρίβεια</strong>
+          <div>{{ '%.1f'|format(report.overall_accuracy_pct) }}%</div>
+        </div>
+        <div class="card">
+          <strong>Τάση</strong>
+          <div>{{ overall_trend_label }}</div>
+        </div>
+      </div>
+
+      {% if narrative_warning %}
+        <div class="warn">Η αφήγηση LLM δεν ήταν διαθέσιμη. Εμφανίζονται μόνο ντετερμινιστικά δεδομένα.</div>
+      {% endif %}
+
+      <h2>Επίδοση ανά δεξιότητα</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Micro-skill</th>
+            <th>Φύλλα</th>
+            <th>Μ.Ο. ακρίβειας</th>
+            <th>Τελευταία ακρίβεια</th>
+            <th>Τάση</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in skill_rows %}
+          <tr>
+            <td>{{ row.micro_skill_id }}</td>
+            <td>{{ row.worksheet_count }}</td>
+            <td>{{ '%.1f'|format(row.avg_accuracy_pct) }}%</td>
+            <td>{{ '%.1f'|format(row.last_accuracy_pct) }}%</td>
+            <td>{{ row.trend }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <h2>Σύνοψη</h2>
+      <p>{{ report.summary_el or 'Δεν υπάρχει διαθέσιμη αφήγηση.' }}</p>
+
+       <h2>Προτάσεις επόμενου βήματος</h2>
+       {% if report.suggestions %}
+       <ul>
+         {% for s in report.suggestions %}
+           <li>
+             {{ s.rationale_el }}
+             {% if s.target_micro_skill_id %}(στόχος: {{ s.target_micro_skill_id }}){% endif %}
+             {% if s.suggested_worksheet_type %}[τύπος: {{ s.suggested_worksheet_type }}]{% endif %}
+             {% if s.target_micro_skill_id %}
+               <div style="margin-top: 0.5rem; padding: 0.5rem; background: #f0f9ff; border-left: 3px solid #0ea5e9; font-size: 0.9rem; font-family: monospace;">
+                 Εντολή: <code>kumon generate {{ s.target_micro_skill_id }} -c {{ report.child_id }}</code>
+               </div>
+             {% endif %}
+           </li>
+         {% endfor %}
+       </ul>
+       {% else %}
+       <p>Δεν υπάρχουν προτάσεις προς το παρόν.</p>
+       {% endif %}
+    {% endif %}
+  </body>
+</html>
+

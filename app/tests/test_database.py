@@ -17,10 +17,12 @@ from app.domain.models import (
     OcrField,
     OcrResult,
     OcrValueSource,
+    ScoreResultSnapshot,
     SubmissionStatus,
     WorksheetSubmission,
 )
 from app.persistence.database import Database
+from app.services.submission_service import confirm_and_score, set_answers_on_draft, start_submission
 from app.services.worksheet_generator import generate_worksheet
 import app.config as cfg
 
@@ -246,4 +248,117 @@ def test_list_pending_worksheets_filters_by_child_id(db, tmp_output):
 
     filtered = db.list_pending_worksheets(child_id=child_a.child_id)
     assert [row.instance_id for row in filtered] == [ws_a.instance_id]
+
+
+def _save_confirmed_score(db: Database, ws) -> None:
+    submission = start_submission(ws.instance_id, db=db)
+    answers = [str(ex.answer) for ex in ws.exercises]
+    set_answers_on_draft(submission.submission_id, answers, db=db)
+    confirm_and_score(submission.submission_id, db=db)
+
+
+def test_list_progress_points_includes_only_confirmed_scored_rows(db, tmp_output):
+    child = ChildProfile(child_id="progress-child", display_name="Πρόοδος", age=10, grade_level=4)
+    db.save_child_profile(child)
+
+    ws_confirmed = generate_worksheet(MicroSkillId.ADDITION_SINGLE_DIGIT, child=child, count=3, seed=31)
+    ws_draft = generate_worksheet(MicroSkillId.ADDITION_SINGLE_DIGIT, child=child, count=3, seed=32)
+    db.save_worksheet_instance(ws_confirmed)
+    db.save_worksheet_instance(ws_draft)
+
+    _save_confirmed_score(db, ws_confirmed)
+    draft = ManualSubmission(instance_id=ws_draft.instance_id, child_id=child.child_id)
+    db.save_manual_submission(draft)
+
+    rows = db.list_progress_points(child_id=child.child_id)
+    assert len(rows) == 1
+    assert rows[0].instance_id == ws_confirmed.instance_id
+
+
+def test_list_progress_points_filters_by_child_id(db, tmp_output):
+    child_a = ChildProfile(child_id="child-a-progress", display_name="Α", age=10, grade_level=4)
+    child_b = ChildProfile(child_id="child-b-progress", display_name="Β", age=10, grade_level=4)
+    db.save_child_profile(child_a)
+    db.save_child_profile(child_b)
+
+    ws_a = generate_worksheet(MicroSkillId.MULTIPLICATION_2_5, child=child_a, count=3, seed=41)
+    ws_b = generate_worksheet(MicroSkillId.MULTIPLICATION_2_5, child=child_b, count=3, seed=42)
+    db.save_worksheet_instance(ws_a)
+    db.save_worksheet_instance(ws_b)
+    _save_confirmed_score(db, ws_a)
+    _save_confirmed_score(db, ws_b)
+
+    rows = db.list_progress_points(child_id=child_a.child_id)
+    assert len(rows) == 1
+    assert rows[0].child_id == child_a.child_id
+
+
+def test_list_progress_points_limit_and_ordering(db, tmp_output):
+    child = ChildProfile(child_id="limit-child", display_name="Όριο", age=10, grade_level=4)
+    db.save_child_profile(child)
+
+    ws1 = generate_worksheet(MicroSkillId.ADDITION_SINGLE_DIGIT, child=child, count=3, seed=51)
+    ws2 = generate_worksheet(MicroSkillId.ADDITION_SINGLE_DIGIT, child=child, count=3, seed=52)
+    ws3 = generate_worksheet(MicroSkillId.ADDITION_SINGLE_DIGIT, child=child, count=3, seed=53)
+    db.save_worksheet_instance(ws1)
+    db.save_worksheet_instance(ws2)
+    db.save_worksheet_instance(ws3)
+    _save_confirmed_score(db, ws1)
+    _save_confirmed_score(db, ws2)
+    _save_confirmed_score(db, ws3)
+
+    rows = db.list_progress_points(child_id=child.child_id, limit=2)
+    assert len(rows) == 2
+    assert rows[0].confirmed_at >= rows[1].confirmed_at
+
+
+def test_list_progress_points_fallback_to_instance_id_snapshot(db, tmp_output):
+    """Confirmed manual submissions should find OCR-path snapshots (submission_id IS NULL)."""
+    child = ChildProfile(child_id="ocr-child", display_name="ΟCR", age=10, grade_level=4)
+    db.save_child_profile(child)
+
+    ws = generate_worksheet(MicroSkillId.ADDITION_SINGLE_DIGIT, child=child, count=3, seed=61)
+    db.save_worksheet_instance(ws)
+
+    # Simulate OCR-path snapshot: linked to instance_id only, submission_id = NULL
+    ocr_snapshot = ScoreResultSnapshot(
+        instance_id=ws.instance_id,
+        ocr_result_id=None,
+        submission_id=None,
+        input_hash="ocr_hash_abc123",
+        accuracy_pct=75.0,
+        details_json='{"correct_count":2,"total_count":3,"entries":[],"mode":"ocr"}',
+    )
+    db.save_score_snapshot(ocr_snapshot)
+
+    # Create a confirmed manual submission WITHOUT calling confirm_and_score
+    # (i.e., simulate old workflow where snapshot existed before manual submission)
+    submission = ManualSubmission(
+        instance_id=ws.instance_id,
+        child_id=child.child_id,
+    )
+    db.save_manual_submission(submission)
+    db.update_manual_submission_status(submission.submission_id, ManualSubmissionStatus.CONFIRMED)
+
+    rows = db.list_progress_points(child_id=child.child_id)
+    assert len(rows) == 1
+    assert rows[0].instance_id == ws.instance_id
+    assert rows[0].accuracy_pct == 75.0
+
+
+def test_list_progress_points_excludes_confirmed_with_no_snapshot(db, tmp_output):
+    """Confirmed submissions with no score snapshot (either path) must be excluded."""
+    child = ChildProfile(child_id="no-snap-child", display_name="Άδειο", age=10, grade_level=4)
+    db.save_child_profile(child)
+
+    ws = generate_worksheet(MicroSkillId.ADDITION_SINGLE_DIGIT, child=child, count=3, seed=71)
+    db.save_worksheet_instance(ws)
+
+    submission = ManualSubmission(instance_id=ws.instance_id, child_id=child.child_id)
+    db.save_manual_submission(submission)
+    db.update_manual_submission_status(submission.submission_id, ManualSubmissionStatus.CONFIRMED)
+
+    rows = db.list_progress_points(child_id=child.child_id)
+    assert rows == []
+
 

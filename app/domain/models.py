@@ -21,7 +21,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -366,6 +366,57 @@ class PendingWorksheetRow(BaseModel):
     exercise_count: int = Field(ge=0)
     has_draft_submission: bool = False
     latest_draft_submission_id: str | None = None
+
+
+class ProgressWorksheetPoint(BaseModel):
+    """One confirmed scored worksheet point used in progress timelines."""
+
+    instance_id: str
+    submission_id: str
+    child_id: str | None = None
+    micro_skill_id: str
+    title_el: str
+    accuracy_pct: float = Field(ge=0.0, le=100.0)
+    correct_count: int = Field(ge=0)
+    total_count: int = Field(ge=0)
+    confirmed_at: datetime
+
+
+class SkillProgress(BaseModel):
+    """Aggregated deterministic progress for a single micro-skill."""
+
+    micro_skill_id: str
+    worksheet_count: int = Field(ge=0)
+    avg_accuracy_pct: float = Field(ge=0.0, le=100.0)
+    last_accuracy_pct: float = Field(ge=0.0, le=100.0)
+    trend: Literal["improving", "stable", "declining", "insufficient_data"]
+
+
+class ProgressSuggestion(BaseModel):
+    """Actionable parent suggestion generated from grounded progress context."""
+
+    target_micro_skill_id: str | None = None
+    suggested_worksheet_type: str | None = None
+    rationale_el: str
+    confidence: str | None = None
+
+
+class ProgressReport(BaseModel):
+    """Unified payload used by CLI and web to render child progress."""
+
+    child_id: str
+    child_display_name: str
+    worksheet_count: int = Field(ge=0)
+    date_from: datetime | None = None
+    date_to: datetime | None = None
+    overall_accuracy_pct: float = Field(ge=0.0, le=100.0)
+    overall_trend: Literal["improving", "stable", "declining", "insufficient_data"]
+    skill_progress: list[SkillProgress] = Field(default_factory=list)
+    narrative_status: Literal["generated", "degraded", "not_requested"] = "not_requested"
+    summary_el: str | None = None
+    suggestions: list[ProgressSuggestion] = Field(default_factory=list)
+    llm_error_code: str | None = None
+    prompt_version: str = "v1/progress_summary"
 
 
 class ScoreResultSnapshot(BaseModel):

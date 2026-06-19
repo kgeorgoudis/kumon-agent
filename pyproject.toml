@@ -18,6 +18,7 @@ dependencies = [
     "pytesseract>=0.3.10",
     "python-magic>=0.4.27",
     "pypdfium2>=4.30.0",
+    "python-dotenv>=1.2.2",
 ]
 
 [project.scripts]

@@ -466,3 +466,93 @@ def confirm_and_score(
         details_json=snapshot.details_json,
     )
 
+
+def backfill_submission_snapshot(
+    submission_id: str,
+    db: Database = default_db,
+) -> SubmitOutcome:
+    """Re-score a confirmed submission that is missing a score snapshot.
+
+    Used as a recovery tool after the NOT NULL migration that prevented snapshots
+    from being persisted. Unlike confirm_and_score, this operates on CONFIRMED
+    submissions without changing their status.
+    """
+    from app.services.scoring_service import build_manual_submission_input_hash
+
+    submission = db.get_manual_submission(submission_id)
+    if submission is None:
+        raise SubmissionNotFoundError(f"Submission not found: {submission_id}")
+    if submission.status != ManualSubmissionStatus.CONFIRMED:
+        raise SubmissionNotDraftError(
+            f"backfill_submission_snapshot requires a confirmed submission, got: {submission.status.value}"
+        )
+
+    worksheet = db.get_worksheet_instance(submission.instance_id)
+    if worksheet is None:
+        raise WorksheetNotFoundError(f"Worksheet not found: {submission.instance_id}")
+
+    entries = db.get_manual_answer_entries(submission_id)
+    entry_map = {e.slot_index: e for e in entries}
+
+    normalized_values: list[str] = []
+    entry_dicts: list[dict] = []
+    for idx, exercise in enumerate(worksheet.exercises):
+        entry = entry_map.get(idx)
+        norm_val = entry.normalized_value if entry else ""
+        raw_val = entry.raw_value if entry else ""
+        normalized_values.append(norm_val)
+        entry_dicts.append(
+            {
+                "exercise_id": exercise.exercise_id,
+                "slot_index": idx,
+                "raw_value": raw_val,
+                "normalized_value": norm_val,
+                "is_valid": entry.is_valid if entry else False,
+                "correct_answer": str(exercise.answer),
+            }
+        )
+
+    correct_answers = [str(ex.answer) for ex in worksheet.exercises]
+    correct_count, total_count = _score_answers(normalized_values, correct_answers)
+    accuracy_pct = (correct_count / total_count * 100.0) if total_count else 0.0
+
+    details = {
+        "entries": entry_dicts,
+        "correct_count": correct_count,
+        "total_count": total_count,
+        "mode": "manual_deterministic",
+    }
+
+    input_hash = build_manual_submission_input_hash(
+        submission.instance_id,
+        submission_id,
+        entry_dicts,
+    )
+
+    existing_snap = db.get_score_snapshot_by_submission_hash(submission_id, input_hash)
+    if existing_snap is None:
+        from app.domain.models import ScoreResultSnapshot
+        snapshot = ScoreResultSnapshot(
+            instance_id=submission.instance_id,
+            submission_id=submission_id,
+            input_hash=input_hash,
+            accuracy_pct=accuracy_pct,
+            details_json=json.dumps(details, ensure_ascii=False),
+        )
+        db.save_score_snapshot(snapshot)
+    else:
+        snapshot = existing_snap
+
+    return SubmitOutcome(
+        submission_id=submission_id,
+        instance_id=submission.instance_id,
+        score_result_id=snapshot.score_result_id,
+        input_hash=input_hash,
+        accuracy_pct=accuracy_pct,
+        correct_count=correct_count,
+        total_count=total_count,
+        duration_seconds=submission.duration_seconds,
+        details_json=snapshot.details_json,
+    )
+
+
