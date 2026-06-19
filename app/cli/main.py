@@ -10,6 +10,8 @@ Usage examples
   kumon submit <instance_id> --answers "2,4,6,8" --time 12:30
   kumon pending
   kumon pending --child "Ελένη"
+  kumon progress --child "Ελένη"
+  kumon progress --child "Ελένη" --no-llm
   kumon list-skills
   kumon explain method
   kumon explain skill multiplication
@@ -53,6 +55,7 @@ from app.services.submission_service import (
     SubmissionAlreadyConfirmedError,
     SubmissionServiceError,
     WorksheetNotFoundError,
+    backfill_submission_snapshot,
     cancel_submission,
     confirm_and_score,
     get_review_summary,
@@ -64,6 +67,7 @@ from app.services.submission_service import (
     start_submission,
     update_single_answer,
 )
+from app.services.progress_summary_service import build_progress_report
 from app.services.worksheet_generator import generate_worksheet
 
 # ── Typer app ─────────────────────────────────────────────────────────────────
@@ -376,6 +380,105 @@ def pending(
         )
 
     console.print(table)
+
+
+def _trend_label_el(trend: str) -> str:
+    labels = {
+        "improving": "Βελτίωση",
+        "stable": "Σταθερή πορεία",
+        "declining": "Πτώση",
+        "insufficient_data": "Ανεπαρκή δεδομένα",
+    }
+    return labels.get(trend, trend)
+
+
+@app.command()
+def progress(
+    child_name: Annotated[
+        Optional[str],
+        typer.Option("--child", "-c", help="Filter by child name."),
+    ] = None,
+    limit: Annotated[
+        int,
+        typer.Option("--limit", "-n", help="Number of confirmed worksheets to include."),
+    ] = 20,
+    no_llm: Annotated[
+        bool,
+        typer.Option("--no-llm", help="Skip LLM narrative and show deterministic report only."),
+    ] = False,
+) -> None:
+    """Show progress summary for one child from confirmed scored worksheets."""
+    profile = _resolve_child(child_name, None)
+    if profile is None or profile.child_id == "transient":
+        if child_name:
+            console.print(
+                f"[yellow]Δεν υπάρχουν ακόμη βαθμολογημένα φύλλα για αναφορά προόδου για '{child_name}'.[/yellow]"
+            )
+        else:
+            console.print("[yellow]Δεν υπάρχουν ακόμη βαθμολογημένα φύλλα για αναφορά προόδου.[/yellow]")
+        raise typer.Exit(code=0)
+
+    report = build_progress_report(
+        child=profile,
+        limit=limit,
+        include_narrative=not no_llm,
+        db=default_db,
+    )
+
+    if report.worksheet_count == 0:
+        console.print("[yellow]Δεν υπάρχουν ακόμη βαθμολογημένα φύλλα για αναφορά προόδου.[/yellow]")
+        return
+
+    date_from = report.date_from.strftime("%Y-%m-%d") if report.date_from else "-"
+    date_to = report.date_to.strftime("%Y-%m-%d") if report.date_to else "-"
+    console.print(
+        Panel(
+            f"[bold]Παιδί:[/bold] {report.child_display_name}\n"
+            f"[bold]Φύλλα:[/bold] {report.worksheet_count}\n"
+            f"[bold]Περίοδος:[/bold] {date_from} έως {date_to}\n"
+            f"[bold]Συνολική ακρίβεια:[/bold] {report.overall_accuracy_pct:.1f}%\n"
+            f"[bold]Τάση:[/bold] {_trend_label_el(report.overall_trend)}",
+            title="Αναφορά Προόδου",
+            border_style="blue",
+        )
+    )
+
+    table = Table(title="Επίδοση ανά δεξιότητα", show_header=True, header_style="bold cyan")
+    table.add_column("Micro-skill", style="cyan")
+    table.add_column("Φύλλα", justify="right")
+    table.add_column("Μ.Ο. Ακρίβειας", justify="right")
+    table.add_column("Τελευταία", justify="right")
+    table.add_column("Τάση")
+    for row in report.skill_progress:
+        table.add_row(
+            row.micro_skill_id,
+            str(row.worksheet_count),
+            f"{row.avg_accuracy_pct:.1f}%",
+            f"{row.last_accuracy_pct:.1f}%",
+            _trend_label_el(row.trend),
+        )
+    console.print(table)
+
+    if report.narrative_status == "degraded":
+        console.print("[yellow]Η αφήγηση LLM δεν ήταν διαθέσιμη. Εμφανίζονται μόνο ντετερμινιστικά δεδομένα.[/yellow]")
+
+    if report.summary_el:
+        console.print(Panel(report.summary_el, title="Σύνοψη", border_style="green"))
+
+    if report.suggestions:
+        console.print("[bold]Προτάσεις επόμενου βήματος:[/bold]")
+        for idx, suggestion in enumerate(report.suggestions, start=1):
+            tail = ""
+            if suggestion.target_micro_skill_id:
+                tail += f" (στόχος: {suggestion.target_micro_skill_id})"
+            if suggestion.suggested_worksheet_type:
+                tail += f" [τύπος: {suggestion.suggested_worksheet_type}]"
+            console.print(f"  {idx}. {suggestion.rationale_el}{tail}")
+
+            # Show the exact command to generate the next worksheet
+            if suggestion.target_micro_skill_id:
+                cmd = f"kumon generate {suggestion.target_micro_skill_id} -c {profile.child_id}"
+                console.print(f"     [dim]→ Εντολή: {cmd}[/dim]")
 
 
 
@@ -706,6 +809,50 @@ def explain_worksheet_types() -> None:
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
+
+
+@app.command("rescore")
+def rescore_command(
+    child: Annotated[
+        Optional[str],
+        typer.Option("--child", "-c", help="Filter by child ID or display name."),
+    ] = None,
+) -> None:
+    """Backfill score snapshots for confirmed submissions that are missing one.
+
+    Run this once after upgrading if 'kumon progress' shows fewer worksheets
+    than expected. It re-scores each confirmed submission deterministically
+    and persists the missing snapshot without changing any other state.
+    """
+    orphans = default_db.list_unscored_confirmed_submissions(child_id=child)
+    if not orphans:
+        console.print("[green]✓[/green] Δεν βρέθηκαν φύλλα χωρίς snapshot βαθμολογίας.")
+        return
+
+    console.print(
+        f"[yellow]Βρέθηκαν {len(orphans)} φύλλα χωρίς snapshot.[/yellow] Επανυπολογισμός..."
+    )
+    ok = 0
+    failed = 0
+    for sub in orphans:
+        try:
+            outcome = backfill_submission_snapshot(sub.submission_id, db=default_db)
+            console.print(
+                f"  [green]✓[/green] {sub.submission_id[:12]}… "
+                f"— {outcome.correct_count}/{outcome.total_count} ({outcome.accuracy_pct:.1f}%)"
+            )
+            ok += 1
+        except SubmissionServiceError as exc:
+            console.print(f"  [red]✗[/red] {sub.submission_id[:12]}…: {exc}")
+            failed += 1
+        except Exception as exc:  # noqa: BLE001
+            console.print(f"  [red]✗[/red] {sub.submission_id[:12]}…: {exc}")
+            failed += 1
+
+    if failed:
+        console.print(f"\n[red]{failed} αποτυχίες.[/red] Εκτελέστε ξανά ή ελέγξτε τα logs.")
+        raise typer.Exit(1)
+    console.print(f"\n[green]✓ {ok} snapshots δημιουργήθηκαν επιτυχώς.[/green]")
 
 
 if __name__ == "__main__":

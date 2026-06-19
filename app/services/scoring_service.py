@@ -127,7 +127,7 @@ def persist_manual_submission_snapshot(
 
     snapshot = ScoreResultSnapshot(
         instance_id=instance_id,
-        ocr_result_id=submission_id,
+        ocr_result_id=None,
         submission_id=submission_id,
         input_hash=input_hash,
         accuracy_pct=accuracy_pct,

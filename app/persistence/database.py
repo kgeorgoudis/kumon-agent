@@ -36,6 +36,7 @@ from app.domain.models import (
     OcrResultStatus,
     OcrValueSource,
     PendingWorksheetRow,
+    ProgressWorksheetPoint,
     ScoreResultSnapshot,
     SubmissionStatus,
     WorksheetInstance,
@@ -243,6 +244,9 @@ class Database:
             _add_column_if_missing(conn, "ocr_results", "confidence_threshold", "REAL NOT NULL DEFAULT 0.80")
             _add_column_if_missing(conn, "ocr_fields", "original_ocr_value", "TEXT")
             _add_column_if_missing(conn, "score_result_snapshots", "submission_id", "TEXT")
+            # Migration: make ocr_result_id nullable so manual submission snapshots
+            # (which have no ocr_result_id) can be inserted without hitting NOT NULL.
+            _migrate_score_snapshots_nullable_ocr(conn)
             conn.execute(
                 """
                 CREATE UNIQUE INDEX IF NOT EXISTS uq_score_snapshots_submission_hash
@@ -478,6 +482,86 @@ class Database:
                 )
             )
         return projections
+
+    def list_progress_points(
+        self,
+        child_id: str,
+        limit: int = 20,
+    ) -> list[ProgressWorksheetPoint]:
+        """Return confirmed scored worksheet points for progress summary reporting.
+
+        Snapshot lookup priority:
+        1. Snapshot linked by submission_id (created by confirm_and_score).
+        2. Fallback: snapshot linked by instance_id (created by OCR/rescore pipeline,
+           submission_id IS NULL). Handles worksheets scored before the manual
+           submission flow or via the OCR ingestion path.
+        Confirmed submissions with no snapshot (either path) are excluded.
+        """
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    wi.instance_id,
+                    wi.child_id,
+                    wi.micro_skill_id,
+                    wi.title_el,
+                    ms.submission_id,
+                    ms.confirmed_at,
+                    COALESCE(
+                        (SELECT s.accuracy_pct FROM score_result_snapshots s
+                         WHERE s.submission_id = ms.submission_id
+                         ORDER BY s.created_at DESC LIMIT 1),
+                        (SELECT s.accuracy_pct FROM score_result_snapshots s
+                         WHERE s.instance_id = ms.instance_id
+                           AND s.submission_id IS NULL
+                         ORDER BY s.created_at DESC LIMIT 1)
+                    ) AS accuracy_pct,
+                    COALESCE(
+                        (SELECT s.details_json FROM score_result_snapshots s
+                         WHERE s.submission_id = ms.submission_id
+                         ORDER BY s.created_at DESC LIMIT 1),
+                        (SELECT s.details_json FROM score_result_snapshots s
+                         WHERE s.instance_id = ms.instance_id
+                           AND s.submission_id IS NULL
+                         ORDER BY s.created_at DESC LIMIT 1)
+                    ) AS details_json
+                FROM manual_submissions ms
+                JOIN worksheet_instances wi
+                    ON wi.instance_id = ms.instance_id
+                WHERE ms.status = ?
+                  AND wi.child_id = ?
+                  AND ms.confirmed_at IS NOT NULL
+                  AND (
+                    (SELECT COUNT(*) FROM score_result_snapshots s
+                     WHERE s.submission_id = ms.submission_id) > 0
+                    OR
+                    (SELECT COUNT(*) FROM score_result_snapshots s
+                     WHERE s.instance_id = ms.instance_id
+                       AND s.submission_id IS NULL) > 0
+                  )
+                ORDER BY ms.confirmed_at DESC
+                LIMIT ?
+                """,
+                (ManualSubmissionStatus.CONFIRMED.value, child_id, limit),
+            ).fetchall()
+
+        points: list[ProgressWorksheetPoint] = []
+        for row in rows:
+            correct_count, total_count = _extract_score_counts(row["details_json"], row["accuracy_pct"])
+            points.append(
+                ProgressWorksheetPoint(
+                    instance_id=row["instance_id"],
+                    submission_id=row["submission_id"],
+                    child_id=row["child_id"],
+                    micro_skill_id=row["micro_skill_id"],
+                    title_el=row["title_el"],
+                    accuracy_pct=row["accuracy_pct"],
+                    correct_count=correct_count,
+                    total_count=total_count,
+                    confirmed_at=datetime.fromisoformat(row["confirmed_at"]),
+                )
+            )
+        return points
 
     # ── OCR ingestion / review ────────────────────────────────────────────────
 
@@ -964,6 +1048,53 @@ class Database:
             for r in rows
         ]
 
+    def list_unscored_confirmed_submissions(
+        self, child_id: str | None = None
+    ) -> list[ManualSubmission]:
+        """Return confirmed manual submissions that have no score snapshot.
+
+        Used by the backfill command to recover data after the NOT NULL migration.
+        """
+        clauses = ["ms.status = ?"]
+        params: list[object] = [ManualSubmissionStatus.CONFIRMED.value]
+        if child_id is not None:
+            clauses.append("wi.child_id = ?")
+            params.append(child_id)
+        where = " AND ".join(clauses)
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT ms.*
+                FROM manual_submissions ms
+                JOIN worksheet_instances wi ON wi.instance_id = ms.instance_id
+                WHERE {where}
+                  AND NOT EXISTS (
+                    SELECT 1 FROM score_result_snapshots s
+                    WHERE s.submission_id = ms.submission_id
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM score_result_snapshots s
+                    WHERE s.instance_id = ms.instance_id AND s.submission_id IS NULL
+                  )
+                ORDER BY ms.confirmed_at ASC
+                """,
+                params,
+            ).fetchall()
+        return [
+            ManualSubmission(
+                submission_id=row["submission_id"],
+                instance_id=row["instance_id"],
+                child_id=row["child_id"],
+                status=ManualSubmissionStatus(row["status"]),
+                entry_mode=ManualEntryMode(row["entry_mode"]),
+                duration_seconds=row["duration_seconds"],
+                confirmed_at=datetime.fromisoformat(row["confirmed_at"]) if row["confirmed_at"] else None,
+                created_at=datetime.fromisoformat(row["created_at"]),
+                updated_at=datetime.fromisoformat(row["updated_at"]),
+            )
+            for row in rows
+        ]
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -979,6 +1110,56 @@ def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, dd
     conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
 
+def _migrate_score_snapshots_nullable_ocr(conn: sqlite3.Connection) -> None:
+    """One-time migration: make score_result_snapshots.ocr_result_id nullable.
+
+    The original schema defined ocr_result_id as NOT NULL. Manual submission
+    snapshots legitimately have ocr_result_id=NULL, so INSERT OR IGNORE was
+    silently swallowing every such insert due to the NOT NULL violation.
+    This migration recreates the table with the correct nullable column and
+    rebuilds all indexes.
+    """
+    col_info = {
+        row[1]: row[3]  # name → notnull flag
+        for row in conn.execute("PRAGMA table_info(score_result_snapshots)").fetchall()
+    }
+    if not col_info.get("ocr_result_id", 0):
+        return  # already nullable — nothing to do
+
+    conn.executescript(
+        """
+        BEGIN;
+        CREATE TABLE score_result_snapshots_v2 (
+            score_result_id      TEXT PRIMARY KEY,
+            instance_id          TEXT NOT NULL,
+            ocr_result_id        TEXT,
+            submission_id        TEXT,
+            input_hash           TEXT NOT NULL,
+            accuracy_pct         REAL NOT NULL,
+            details_json         TEXT NOT NULL,
+            created_at           TEXT NOT NULL
+        );
+        INSERT OR IGNORE INTO score_result_snapshots_v2
+            SELECT score_result_id, instance_id, ocr_result_id, submission_id,
+                   input_hash, accuracy_pct, details_json, created_at
+            FROM score_result_snapshots;
+        DROP TABLE score_result_snapshots;
+        ALTER TABLE score_result_snapshots_v2 RENAME TO score_result_snapshots;
+        CREATE INDEX IF NOT EXISTS idx_score_snapshots_ocr
+            ON score_result_snapshots (ocr_result_id, created_at DESC);
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_score_snapshots_ocr_hash
+            ON score_result_snapshots (ocr_result_id, input_hash)
+            WHERE ocr_result_id IS NOT NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_score_snapshots_submission_hash
+            ON score_result_snapshots (submission_id, input_hash)
+            WHERE submission_id IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_score_snapshots_submission
+            ON score_result_snapshots (submission_id, created_at DESC);
+        COMMIT;
+        """
+    )
+
+
 def _parse_ocr_status(raw: str) -> OcrResultStatus:
     # Backward compatibility for rows persisted before lifecycle expansion.
     if raw == "pending_review":
@@ -986,6 +1167,27 @@ def _parse_ocr_status(raw: str) -> OcrResultStatus:
     if raw == "rejected":
         return OcrResultStatus.MISMATCHED
     return OcrResultStatus(raw)
+
+
+def _extract_score_counts(details_json: str, accuracy_pct: float) -> tuple[int, int]:
+    """Extract deterministic score counts from snapshot details payload."""
+    try:
+        details = json.loads(details_json)
+    except json.JSONDecodeError:
+        return 0, 0
+
+    total = details.get("total_count")
+    correct = details.get("correct_count")
+    if isinstance(total, int) and isinstance(correct, int) and total >= 0 and correct >= 0:
+        return correct, total
+
+    entries = details.get("entries") if isinstance(details, dict) else None
+    if isinstance(entries, list):
+        total = len(entries)
+        correct = round(total * (accuracy_pct / 100.0))
+        return max(correct, 0), max(total, 0)
+
+    return 0, 0
 
 
 def _row_to_worksheet(row: sqlite3.Row) -> WorksheetInstance:
