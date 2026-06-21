@@ -61,11 +61,11 @@ Key ideas
 What this app does
 ------------------
 This app implements the Kumon loop locally:
-  generate worksheet → print → child solves on paper → parent uploads photo →
-  app reads answers (OCR) → parent reviews → app scores → app suggests next sheet
+  generate worksheet → print → child solves on paper → parent enters answers
+  (kumon submit) → app scores → app suggests next sheet
 
-The LLM (AI) is used only for optional tasks: explaining mistakes in Greek,
-summarising results for the parent, and classifying ambiguous handwriting.
+The LLM (AI) is used only for optional tasks: explaining mistakes in Greek and
+summarising results for the parent.
 All scoring and progression decisions are made by deterministic code — you can
 inspect every rule.
 """

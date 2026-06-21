@@ -15,12 +15,7 @@ from app.domain.models import (
     ManualSubmission,
     ManualSubmissionStatus,
     MicroSkillId,
-    OcrField,
-    OcrResult,
-    OcrValueSource,
     ScoreResultSnapshot,
-    SubmissionStatus,
-    WorksheetSubmission,
     WorksheetInstance,
 )
 from app.persistence.database import Database
@@ -150,76 +145,6 @@ def test_filter_by_micro_skill(db, tmp_output, child):
     assert all(s.micro_skill_id == MicroSkillId.MULTIPLICATION_2_5 for s in sheets)
 
 
-def test_submission_status_transition_to_ocr_processed(db, tmp_output):
-    ws = generate_worksheet(MicroSkillId.ADDITION_SINGLE_DIGIT, count=2, seed=3)
-    db.save_worksheet_instance(ws)
-
-    submission = WorksheetSubmission(
-        instance_id=ws.instance_id,
-        file_path="/tmp/sub.jpg",
-        mime_type="image/jpeg",
-        file_hash="abc123",
-    )
-    db.save_worksheet_submission(submission)
-    db.update_submission_status(submission.submission_id, SubmissionStatus.OCR_PROCESSED)
-
-    fetched = db.get_submission(submission.submission_id)
-    assert fetched is not None
-    assert fetched.status == SubmissionStatus.OCR_PROCESSED
-
-
-def test_save_and_get_ocr_result_and_fields(db, tmp_output):
-    ws = generate_worksheet(MicroSkillId.ADDITION_SINGLE_DIGIT, count=2, seed=5)
-    db.save_worksheet_instance(ws)
-
-    submission = WorksheetSubmission(
-        instance_id=ws.instance_id,
-        file_path="/tmp/sub.jpg",
-        mime_type="image/jpeg",
-        file_hash="hash",
-    )
-    db.save_worksheet_submission(submission)
-
-    result = OcrResult(
-        submission_id=submission.submission_id,
-        instance_id=ws.instance_id,
-        overall_confidence=0.9,
-    )
-    db.save_ocr_result(result)
-
-    fields = [
-        OcrField(
-            ocr_result_id=result.ocr_result_id,
-            exercise_id=ws.exercises[0].exercise_id,
-            slot_index=0,
-            raw_value="12",
-            confidence=0.95,
-            needs_review=False,
-        ),
-        OcrField(
-            ocr_result_id=result.ocr_result_id,
-            exercise_id=ws.exercises[1].exercise_id,
-            slot_index=1,
-            raw_value="?",
-            confidence=0.2,
-            needs_review=True,
-        ),
-    ]
-    db.save_ocr_fields(fields)
-
-    fetched_result = db.get_ocr_result(result.ocr_result_id)
-    assert fetched_result is not None
-
-    fetched_fields = db.get_ocr_fields(result.ocr_result_id)
-    assert len(fetched_fields) == 2
-    assert fetched_fields[0].slot_index == 0
-    assert fetched_fields[1].needs_review is True
-
-    db.update_ocr_field_correction(fetched_fields[1].ocr_field_id, "34", OcrValueSource.MANUAL)
-    corrected = db.get_ocr_fields(result.ocr_result_id)[1]
-    assert corrected.corrected_value == "34"
-    assert corrected.value_source == OcrValueSource.MANUAL
-
 
 def test_list_pending_worksheets_excludes_confirmed_submission(db, tmp_output):
     ws_pending = generate_worksheet(MicroSkillId.ADDITION_SINGLE_DIGIT, count=2, seed=11)
@@ -344,39 +269,6 @@ def test_list_progress_points_limit_and_ordering(db, tmp_output):
     assert len(rows) == 2
     assert rows[0].confirmed_at >= rows[1].confirmed_at
 
-
-def test_list_progress_points_fallback_to_instance_id_snapshot(db, tmp_output):
-    """Confirmed manual submissions should find OCR-path snapshots (submission_id IS NULL)."""
-    child = ChildProfile(child_id="ocr-child", display_name="ΟCR", age=10, grade_level=4)
-    db.save_child_profile(child)
-
-    ws = generate_worksheet(MicroSkillId.ADDITION_SINGLE_DIGIT, child=child, count=3, seed=61)
-    db.save_worksheet_instance(ws)
-
-    # Simulate OCR-path snapshot: linked to instance_id only, submission_id = NULL
-    ocr_snapshot = ScoreResultSnapshot(
-        instance_id=ws.instance_id,
-        ocr_result_id=None,
-        submission_id=None,
-        input_hash="ocr_hash_abc123",
-        accuracy_pct=75.0,
-        details_json='{"correct_count":2,"total_count":3,"entries":[],"mode":"ocr"}',
-    )
-    db.save_score_snapshot(ocr_snapshot)
-
-    # Create a confirmed manual submission WITHOUT calling confirm_and_score
-    # (i.e., simulate old workflow where snapshot existed before manual submission)
-    submission = ManualSubmission(
-        instance_id=ws.instance_id,
-        child_id=child.child_id,
-    )
-    db.save_manual_submission(submission)
-    db.update_manual_submission_status(submission.submission_id, ManualSubmissionStatus.CONFIRMED)
-
-    rows = db.list_progress_points(child_id=child.child_id)
-    assert len(rows) == 1
-    assert rows[0].instance_id == ws.instance_id
-    assert rows[0].accuracy_pct == 75.0
 
 
 def test_list_progress_points_excludes_confirmed_with_no_snapshot(db, tmp_output):

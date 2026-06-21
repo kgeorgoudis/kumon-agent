@@ -60,14 +60,4 @@ DEFAULT_CHILD_NAME: str = os.environ.get("KUMON_CHILD_NAME", "Μαθητής")
 DEFAULT_CHILD_AGE: int = int(os.environ.get("KUMON_CHILD_AGE", "10"))
 DEFAULT_CHILD_GRADE: int = int(os.environ.get("KUMON_CHILD_GRADE", "4"))
 
-# ── OCR defaults ──────────────────────────────────────────────────────────────
-OCR_ENGINE: str = os.environ.get("KUMON_OCR_ENGINE", "hybrid")
-OCR_CONFIDENCE_THRESHOLD: float = float(os.environ.get("KUMON_OCR_CONFIDENCE_THRESHOLD", "0.80"))
-
-# Optional local vision fallback for low-confidence OCR fields.
-OCR_FALLBACK_ENABLED: bool = os.environ.get("KUMON_OCR_FALLBACK_ENABLED", "1") not in {"0", "false", "False"}
-OCR_FALLBACK_BASE_URL: str = os.environ.get("KUMON_OCR_FALLBACK_BASE_URL", LLM_BASE_URL)
-OCR_FALLBACK_MODEL: str = os.environ.get("KUMON_OCR_FALLBACK_MODEL", "shashikanth-a/Llama-3.2-11B-Vision-4bit")
-OCR_FALLBACK_API_KEY: str = os.environ.get("KUMON_OCR_FALLBACK_API_KEY", LLM_API_KEY)
-OCR_FALLBACK_TIMEOUT: float = float(os.environ.get("KUMON_OCR_FALLBACK_TIMEOUT", str(LLM_TIMEOUT)))
 

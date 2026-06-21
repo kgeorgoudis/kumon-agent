@@ -100,55 +100,6 @@ class Operator(str, Enum):
     DIVIDE = "÷"
 
 
-class SubmissionStatus(str, Enum):
-    """Lifecycle status of an uploaded worksheet artifact."""
-
-    UPLOADED = "uploaded"
-    OCR_PROCESSED = "ocr_processed"
-    REVIEW_PENDING = "review_pending"
-    REVIEWED = "reviewed"
-    SCORED = "scored"
-    FAILED = "failed"
-
-
-class OcrResultStatus(str, Enum):
-    """Review lifecycle for OCR results."""
-
-    INGESTED = "ingested"
-    EXTRACTED = "extracted"
-    NEEDS_REVIEW = "needs_review"
-    MISMATCHED = "mismatched"
-    FAILED = "failed"
-    REVIEWED = "reviewed"
-    SCORED = "scored"
-
-
-_OCR_STATUS_TRANSITIONS: dict[OcrResultStatus, set[OcrResultStatus]] = {
-    OcrResultStatus.INGESTED: {OcrResultStatus.EXTRACTED},
-    OcrResultStatus.EXTRACTED: {
-        OcrResultStatus.NEEDS_REVIEW,
-        OcrResultStatus.MISMATCHED,
-        OcrResultStatus.FAILED,
-    },
-    OcrResultStatus.NEEDS_REVIEW: {OcrResultStatus.REVIEWED},
-    OcrResultStatus.MISMATCHED: {OcrResultStatus.REVIEWED},
-    OcrResultStatus.REVIEWED: {OcrResultStatus.SCORED},
-    OcrResultStatus.FAILED: set(),
-    OcrResultStatus.SCORED: set(),
-}
-
-
-def can_transition_ocr_status(current: OcrResultStatus, target: OcrResultStatus) -> bool:
-    """Return True when an OCR status transition is allowed by the lifecycle."""
-    return target in _OCR_STATUS_TRANSITIONS[current]
-
-
-class OcrValueSource(str, Enum):
-    """Whether a value came from OCR directly or a parent correction."""
-
-    OCR = "ocr"
-    MANUAL = "manual"
-
 
 class ManualSubmissionStatus(str, Enum):
     """Lifecycle state for parent-entered manual submissions."""
@@ -287,52 +238,6 @@ class ProgressDecision(BaseModel):
     override_note: str = ""
 
 
-class WorksheetSubmission(BaseModel):
-    """One uploaded worksheet artifact linked to a generated worksheet instance."""
-
-    submission_id: str = Field(default_factory=_new_id)
-    instance_id: str
-    child_id: str | None = None
-    file_path: str
-    mime_type: str
-    file_hash: str
-    uploaded_at: datetime = Field(default_factory=_now)
-    status: SubmissionStatus = SubmissionStatus.UPLOADED
-    failure_reason: str | None = None
-
-
-class OcrResult(BaseModel):
-    """Container model for OCR output tied to one submission."""
-
-    ocr_result_id: str = Field(default_factory=_new_id)
-    submission_id: str
-    instance_id: str
-    engine: str = "hybrid"
-    engine_version: str = "unknown"
-    fallback_model: str | None = None
-    confidence_threshold: float = Field(default=0.80, ge=0.0, le=1.0)
-    overall_confidence: float = Field(ge=0.0, le=1.0)
-    status: OcrResultStatus = OcrResultStatus.INGESTED
-    created_at: datetime = Field(default_factory=_now)
-    reviewed_at: datetime | None = None
-
-
-class OcrField(BaseModel):
-    """Per-exercise extracted answer plus manual correction metadata."""
-
-    ocr_field_id: str = Field(default_factory=_new_id)
-    ocr_result_id: str
-    exercise_id: str
-    slot_index: int = Field(ge=0)
-    raw_value: str | None = None
-    confidence: float = Field(ge=0.0, le=1.0)
-    needs_review: bool = False
-    original_ocr_value: str | None = None
-    corrected_value: str | None = None
-    value_source: OcrValueSource = OcrValueSource.OCR
-    bbox: str | None = None
-    updated_at: datetime = Field(default_factory=_now)
-
 
 class ManualSubmission(BaseModel):
     """Parent-entered submission session linked to one worksheet."""
@@ -425,11 +330,10 @@ class ProgressReport(BaseModel):
 
 
 class ScoreResultSnapshot(BaseModel):
-    """Immutable deterministic score record from reviewed OCR values."""
+    """Immutable deterministic score record from manually entered answers."""
 
     score_result_id: str = Field(default_factory=_new_id)
     instance_id: str
-    ocr_result_id: str | None = None
     submission_id: str | None = None
     input_hash: str
     accuracy_pct: float

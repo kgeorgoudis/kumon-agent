@@ -42,7 +42,7 @@ X.   In-App Documentation             ← KnowledgeBase embedded, not README-onl
 Milestone Roadmap
 -----------------
 M1 (v0.1.0 ✅ DONE)      → Worksheet generation, in-app docs, local profiles
-M2 (v0.2.0 PLANNED)      → OCR ingestion, scoring engine, mastery tracking
+M2 (v0.2.0 ✅ DONE)      → Manual submission, scoring engine, mastery tracking
 M3 (v0.3.0 PLANNED)      → Progression planner, parent dashboard
 M4 (v0.4.0 PLANNED)      → LLM explanations in Greek, evaluation harness
 
@@ -50,8 +50,8 @@ Testing Strategy
 ----------------
 - Unit tests for all domain logic (deterministic rules, math engine)
 - Integration tests for service orchestration and I/O
-- Fixture-based tests for worksheet parsing, OCR edge cases
-- Regression tests for past bugs (added during M2+)
+- Fixture-based tests for worksheet parsing and scoring
+- Regression tests for past bugs
 - All tests are offline, require no external services
 
 Development Notes

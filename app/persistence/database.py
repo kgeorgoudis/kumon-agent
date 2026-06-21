@@ -31,19 +31,12 @@ from app.domain.models import (
     ManualSubmission,
     ManualSubmissionStatus,
     MicroSkillId,
-    OcrField,
-    OcrResult,
-    OcrResultStatus,
-    OcrValueSource,
     PendingWorksheetRow,
     ProgressWorksheetPoint,
     ProgressDecision,
     ScoreResultSnapshot,
-    SubmissionStatus,
     WorksheetInstance,
-    WorksheetSubmission,
     WorksheetType,
-    can_transition_ocr_status,
 )
 
 # ── Schema DDL ────────────────────────────────────────────────────────────────
@@ -258,12 +251,9 @@ class Database:
     def _init_schema(self) -> None:
         with self.connect() as conn:
             conn.executescript(_SCHEMA_SQL)
-            _add_column_if_missing(conn, "ocr_results", "fallback_model", "TEXT")
-            _add_column_if_missing(conn, "ocr_results", "confidence_threshold", "REAL NOT NULL DEFAULT 0.80")
-            _add_column_if_missing(conn, "ocr_fields", "original_ocr_value", "TEXT")
-            _add_column_if_missing(conn, "score_result_snapshots", "submission_id", "TEXT")
-            # Migration: make ocr_result_id nullable so manual submission snapshots
-            # (which have no ocr_result_id) can be inserted without hitting NOT NULL.
+            # Legacy migration: make ocr_result_id nullable in score snapshots.
+            # OCR capability has been removed; this migration is kept to ensure
+            # existing databases upgrade cleanly without errors.
             _migrate_score_snapshots_nullable_ocr(conn)
             conn.execute(
                 """
@@ -512,12 +502,7 @@ class Database:
     ) -> list[ProgressWorksheetPoint]:
         """Return confirmed scored worksheet points for progress summary reporting.
 
-        Snapshot lookup priority:
-        1. Snapshot linked by submission_id (created by confirm_and_score).
-        2. Fallback: snapshot linked by instance_id (created by OCR/rescore pipeline,
-           submission_id IS NULL). Handles worksheets scored before the manual
-           submission flow or via the OCR ingestion path.
-        Confirmed submissions with no snapshot (either path) are excluded.
+        Only manual submission snapshots (linked by submission_id) are counted.
         """
         with self.connect() as conn:
             rows = conn.execute(
@@ -529,24 +514,12 @@ class Database:
                     wi.title_el,
                     ms.submission_id,
                     ms.confirmed_at,
-                    COALESCE(
-                        (SELECT s.accuracy_pct FROM score_result_snapshots s
-                         WHERE s.submission_id = ms.submission_id
-                         ORDER BY s.created_at DESC LIMIT 1),
-                        (SELECT s.accuracy_pct FROM score_result_snapshots s
-                         WHERE s.instance_id = ms.instance_id
-                           AND s.submission_id IS NULL
-                         ORDER BY s.created_at DESC LIMIT 1)
-                    ) AS accuracy_pct,
-                    COALESCE(
-                        (SELECT s.details_json FROM score_result_snapshots s
-                         WHERE s.submission_id = ms.submission_id
-                         ORDER BY s.created_at DESC LIMIT 1),
-                        (SELECT s.details_json FROM score_result_snapshots s
-                         WHERE s.instance_id = ms.instance_id
-                           AND s.submission_id IS NULL
-                         ORDER BY s.created_at DESC LIMIT 1)
-                    ) AS details_json
+                    (SELECT s.accuracy_pct FROM score_result_snapshots s
+                     WHERE s.submission_id = ms.submission_id
+                     ORDER BY s.created_at DESC LIMIT 1) AS accuracy_pct,
+                    (SELECT s.details_json FROM score_result_snapshots s
+                     WHERE s.submission_id = ms.submission_id
+                     ORDER BY s.created_at DESC LIMIT 1) AS details_json
                 FROM manual_submissions ms
                 JOIN worksheet_instances wi
                     ON wi.instance_id = ms.instance_id
@@ -554,13 +527,9 @@ class Database:
                   AND wi.child_id = ?
                   AND ms.confirmed_at IS NOT NULL
                   AND (
-                    (SELECT COUNT(*) FROM score_result_snapshots s
-                     WHERE s.submission_id = ms.submission_id) > 0
-                    OR
-                    (SELECT COUNT(*) FROM score_result_snapshots s
-                     WHERE s.instance_id = ms.instance_id
-                       AND s.submission_id IS NULL) > 0
-                  )
+                    SELECT COUNT(*) FROM score_result_snapshots s
+                    WHERE s.submission_id = ms.submission_id
+                  ) > 0
                 ORDER BY ms.confirmed_at DESC
                 LIMIT ?
                 """,
@@ -585,7 +554,7 @@ class Database:
             )
         return points
 
-    # ── OCR ingestion / review ────────────────────────────────────────────────
+    # ── Manual submission ─────────────────────────────────────────────────────
 
     def save_manual_submission(self, submission: ManualSubmission) -> None:
         with self.connect() as conn:
@@ -770,208 +739,6 @@ class Database:
                 ),
             )
 
-    def save_worksheet_submission(self, submission: WorksheetSubmission) -> None:
-        with self.connect() as conn:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO worksheet_submissions
-                    (submission_id, instance_id, child_id, file_path, mime_type,
-                     file_hash, uploaded_at, status, failure_reason)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    submission.submission_id,
-                    submission.instance_id,
-                    submission.child_id,
-                    submission.file_path,
-                    submission.mime_type,
-                    submission.file_hash,
-                    _iso(submission.uploaded_at),
-                    submission.status.value,
-                    submission.failure_reason,
-                ),
-            )
-
-    def get_submission(self, submission_id: str) -> WorksheetSubmission | None:
-        with self.connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM worksheet_submissions WHERE submission_id = ?",
-                (submission_id,),
-            ).fetchone()
-        if row is None:
-            return None
-        return WorksheetSubmission(
-            submission_id=row["submission_id"],
-            instance_id=row["instance_id"],
-            child_id=row["child_id"],
-            file_path=row["file_path"],
-            mime_type=row["mime_type"],
-            file_hash=row["file_hash"],
-            uploaded_at=datetime.fromisoformat(row["uploaded_at"]),
-            status=SubmissionStatus(row["status"]),
-            failure_reason=row["failure_reason"],
-        )
-
-    def update_submission_status(
-        self,
-        submission_id: str,
-        status: SubmissionStatus,
-        failure_reason: str | None = None,
-    ) -> None:
-        with self.connect() as conn:
-            conn.execute(
-                """
-                UPDATE worksheet_submissions
-                SET status = ?, failure_reason = ?
-                WHERE submission_id = ?
-                """,
-                (status.value, failure_reason, submission_id),
-            )
-
-    def save_ocr_result(self, result: OcrResult) -> None:
-        with self.connect() as conn:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO ocr_results
-                    (ocr_result_id, submission_id, instance_id, engine,
-                     engine_version, fallback_model, confidence_threshold,
-                     overall_confidence, status, created_at, reviewed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    result.ocr_result_id,
-                    result.submission_id,
-                    result.instance_id,
-                    result.engine,
-                    result.engine_version,
-                    result.fallback_model,
-                    result.confidence_threshold,
-                    result.overall_confidence,
-                    result.status.value,
-                    _iso(result.created_at),
-                    _iso(result.reviewed_at) if result.reviewed_at else None,
-                ),
-            )
-
-    def get_ocr_result(self, ocr_result_id: str) -> OcrResult | None:
-        with self.connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM ocr_results WHERE ocr_result_id = ?",
-                (ocr_result_id,),
-            ).fetchone()
-        if row is None:
-            return None
-        return OcrResult(
-            ocr_result_id=row["ocr_result_id"],
-            submission_id=row["submission_id"],
-            instance_id=row["instance_id"],
-            engine=row["engine"],
-            engine_version=row["engine_version"],
-            fallback_model=row["fallback_model"] if "fallback_model" in row.keys() else None,
-            confidence_threshold=row["confidence_threshold"] if "confidence_threshold" in row.keys() else 0.80,
-            overall_confidence=row["overall_confidence"],
-            status=_parse_ocr_status(row["status"]),
-            created_at=datetime.fromisoformat(row["created_at"]),
-            reviewed_at=datetime.fromisoformat(row["reviewed_at"]) if row["reviewed_at"] else None,
-        )
-
-    def save_ocr_fields(self, fields: list[OcrField]) -> None:
-        with self.connect() as conn:
-            conn.executemany(
-                """
-                INSERT OR REPLACE INTO ocr_fields
-                    (ocr_field_id, ocr_result_id, exercise_id, slot_index,
-                     raw_value, confidence, needs_review, original_ocr_value, corrected_value,
-                     value_source, bbox, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    (
-                        f.ocr_field_id,
-                        f.ocr_result_id,
-                        f.exercise_id,
-                        f.slot_index,
-                        f.raw_value,
-                        f.confidence,
-                        int(f.needs_review),
-                        f.original_ocr_value,
-                        f.corrected_value,
-                        f.value_source.value,
-                        f.bbox,
-                        _iso(f.updated_at),
-                    )
-                    for f in fields
-                ],
-            )
-
-    def get_ocr_fields(self, ocr_result_id: str) -> list[OcrField]:
-        with self.connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM ocr_fields WHERE ocr_result_id = ? ORDER BY slot_index ASC",
-                (ocr_result_id,),
-            ).fetchall()
-        return [
-            OcrField(
-                ocr_field_id=r["ocr_field_id"],
-                ocr_result_id=r["ocr_result_id"],
-                exercise_id=r["exercise_id"],
-                slot_index=r["slot_index"],
-                raw_value=r["raw_value"],
-                confidence=r["confidence"],
-                needs_review=bool(r["needs_review"]),
-                original_ocr_value=r["original_ocr_value"] if "original_ocr_value" in r.keys() else None,
-                corrected_value=r["corrected_value"],
-                value_source=OcrValueSource(r["value_source"]),
-                bbox=r["bbox"],
-                updated_at=datetime.fromisoformat(r["updated_at"]),
-            )
-            for r in rows
-        ]
-
-    def update_ocr_field_correction(
-        self,
-        ocr_field_id: str,
-        corrected_value: str,
-        value_source: OcrValueSource = OcrValueSource.MANUAL,
-    ) -> None:
-        with self.connect() as conn:
-            conn.execute(
-                """
-                UPDATE ocr_fields
-                SET corrected_value = ?,
-                    original_ocr_value = COALESCE(original_ocr_value, raw_value),
-                    value_source = ?,
-                    updated_at = ?
-                WHERE ocr_field_id = ?
-                """,
-                (corrected_value, value_source.value, _iso(datetime.now(timezone.utc)), ocr_field_id),
-            )
-
-    def transition_ocr_result_status(
-        self,
-        ocr_result_id: str,
-        target_status: OcrResultStatus,
-    ) -> None:
-        result = self.get_ocr_result(ocr_result_id)
-        if result is None:
-            return
-        if not can_transition_ocr_status(result.status, target_status):
-            raise ValueError(f"Invalid OCR status transition: {result.status.value} -> {target_status.value}")
-        reviewed_at_value = _iso(datetime.now(timezone.utc)) if target_status == OcrResultStatus.REVIEWED else (
-            _iso(result.reviewed_at) if result.reviewed_at else None
-        )
-        with self.connect() as conn:
-            conn.execute(
-                """
-                UPDATE ocr_results
-                SET status = ?, reviewed_at = ?
-                WHERE ocr_result_id = ?
-                """,
-                (target_status.value, reviewed_at_value, ocr_result_id),
-            )
-
-    def mark_ocr_result_reviewed(self, ocr_result_id: str) -> None:
-        self.transition_ocr_result_status(ocr_result_id, OcrResultStatus.REVIEWED)
 
     def save_score_snapshot(self, snapshot: ScoreResultSnapshot) -> None:
         with self.connect() as conn:
@@ -980,12 +747,11 @@ class Database:
                 INSERT OR IGNORE INTO score_result_snapshots
                     (score_result_id, instance_id, ocr_result_id, submission_id,
                      input_hash, accuracy_pct, details_json, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, NULL, ?, ?, ?, ?, ?)
                 """,
                 (
                     snapshot.score_result_id,
                     snapshot.instance_id,
-                    snapshot.ocr_result_id,
                     snapshot.submission_id,
                     snapshot.input_hash,
                     snapshot.accuracy_pct,
@@ -994,31 +760,6 @@ class Database:
                 ),
             )
 
-    def get_score_snapshot_by_hash(
-        self,
-        ocr_result_id: str,
-        input_hash: str,
-    ) -> ScoreResultSnapshot | None:
-        with self.connect() as conn:
-            row = conn.execute(
-                """
-                SELECT * FROM score_result_snapshots
-                WHERE ocr_result_id = ? AND input_hash = ?
-                """,
-                (ocr_result_id, input_hash),
-            ).fetchone()
-        if row is None:
-            return None
-        return ScoreResultSnapshot(
-            score_result_id=row["score_result_id"],
-            instance_id=row["instance_id"],
-            ocr_result_id=row["ocr_result_id"],
-            submission_id=row["submission_id"] if "submission_id" in row.keys() else None,
-            input_hash=row["input_hash"],
-            accuracy_pct=row["accuracy_pct"],
-            details_json=row["details_json"],
-            created_at=datetime.fromisoformat(row["created_at"]),
-        )
 
     def get_score_snapshot_by_submission_hash(
         self,
@@ -1038,7 +779,6 @@ class Database:
         return ScoreResultSnapshot(
             score_result_id=row["score_result_id"],
             instance_id=row["instance_id"],
-            ocr_result_id=row["ocr_result_id"],
             submission_id=row["submission_id"],
             input_hash=row["input_hash"],
             accuracy_pct=row["accuracy_pct"],
@@ -1046,29 +786,6 @@ class Database:
             created_at=datetime.fromisoformat(row["created_at"]),
         )
 
-    def list_score_snapshots(self, ocr_result_id: str) -> list[ScoreResultSnapshot]:
-        with self.connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT * FROM score_result_snapshots
-                WHERE ocr_result_id = ?
-                ORDER BY created_at DESC
-                """,
-                (ocr_result_id,),
-            ).fetchall()
-        return [
-            ScoreResultSnapshot(
-                score_result_id=r["score_result_id"],
-                instance_id=r["instance_id"],
-                ocr_result_id=r["ocr_result_id"],
-                submission_id=r["submission_id"] if "submission_id" in r.keys() else None,
-                input_hash=r["input_hash"],
-                accuracy_pct=r["accuracy_pct"],
-                details_json=r["details_json"],
-                created_at=datetime.fromisoformat(r["created_at"]),
-            )
-            for r in rows
-        ]
 
     def list_unscored_confirmed_submissions(
         self, child_id: str | None = None
@@ -1183,13 +900,6 @@ def _iso(dt: datetime) -> str:
     return dt.isoformat()
 
 
-def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
-    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-    if column in existing:
-        return
-    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
-
-
 def _migrate_score_snapshots_nullable_ocr(conn: sqlite3.Connection) -> None:
     """One-time migration: make score_result_snapshots.ocr_result_id nullable.
 
@@ -1240,13 +950,6 @@ def _migrate_score_snapshots_nullable_ocr(conn: sqlite3.Connection) -> None:
     )
 
 
-def _parse_ocr_status(raw: str) -> OcrResultStatus:
-    # Backward compatibility for rows persisted before lifecycle expansion.
-    if raw == "pending_review":
-        return OcrResultStatus.NEEDS_REVIEW
-    if raw == "rejected":
-        return OcrResultStatus.MISMATCHED
-    return OcrResultStatus(raw)
 
 
 def _extract_score_counts(details_json: str, accuracy_pct: float) -> tuple[int, int]:

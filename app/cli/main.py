@@ -27,7 +27,7 @@ Constitutional Principles encoded here:
   IX  — CLI and web call the same service layer (app/services/).
   X   — `kumon explain` makes Kumon documentation available from the CLI.
   VII — Greek text is used for all child/parent-facing output.
-  VIII — No OCR or vision model required for the core workflow.
+  VIII — Manual submission is the only supported workflow (kumon submit).
 """
 
 from __future__ import annotations

@@ -14,10 +14,6 @@ dependencies = [
     "openai>=1.50.0",
     "langgraph>=0.2.0",
     "langchain-openai>=0.2.0",
-    "pillow>=10.4.0",
-    "pytesseract>=0.3.10",
-    "python-magic>=0.4.27",
-    "pypdfium2>=4.30.0",
     "python-dotenv>=1.2.2",
 ]
 
