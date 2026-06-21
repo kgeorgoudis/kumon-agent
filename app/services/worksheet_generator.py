@@ -77,7 +77,10 @@ _INSTRUCTIONS_EL: dict[MicroSkillId, str] = {
     MicroSkillId.DIVISION_6_9: "Κάνε τις παρακάτω διαιρέσεις.",
     MicroSkillId.DIVISION_MIXED: "Κάνε τις παρακάτω διαιρέσεις.",
     MicroSkillId.HALF_AND_DOUBLE: "Βρες το μισό ή το διπλό κάθε αριθμού.",
-    MicroSkillId.ORDERING_NUMBERS: "Διάταξε τους αριθμούς από το μικρότερο στο μεγαλύτερο.",
+    MicroSkillId.ORDERING_NUMBERS: (
+        "Διάταξε τους αριθμούς όπως ζητά κάθε άσκηση "
+        "(Αύξουσα ή Φθίνουσα σειρά)."
+    ),
 }
 
 

@@ -114,6 +114,19 @@ def test_answer_key_not_same_as_worksheet(tmp_output):
     assert ws_html != key_html
 
 
+def test_ordering_numbers_worksheet_contains_direction_text(tmp_output):
+    instance = generate_worksheet(MicroSkillId.ORDERING_NUMBERS, count=6, seed=11)
+    html = Path(instance.html_path).read_text(encoding="utf-8")
+    assert "Αύξουσα" in html or "Φθίνουσα" in html
+    assert "___" in html
+
+
+def test_ordering_numbers_answer_key_contains_canonical_sequence(tmp_output):
+    instance = generate_worksheet(MicroSkillId.ORDERING_NUMBERS, count=5, seed=19)
+    key_html = Path(instance.answer_key_path).read_text(encoding="utf-8")
+    assert any((ex.canonical_answer or "") in key_html for ex in instance.exercises)
+
+
 # ── Greek content ─────────────────────────────────────────────────────────────
 
 

@@ -33,6 +33,13 @@ def worksheet(db: Database, tmp_output):
     return ws
 
 
+@pytest.fixture()
+def ordering_worksheet(db: Database, tmp_output):
+    ws = generate_worksheet(MicroSkillId.ORDERING_NUMBERS, count=3, seed=55)
+    db.save_worksheet_instance(ws)
+    return ws
+
+
 def test_cli_app_starts_for_submit_scaffold():
     """CLI boots and shows help with submit command listed."""
     result = runner.invoke(app, ["--help"])
@@ -117,4 +124,16 @@ def test_cli_submit_with_valid_time_shows_in_output(db: Database, worksheet, mon
     assert result.exit_code == 0
     # 5 minutes = 300 seconds = displayed as 5:00
     assert "5:00" in result.output
+
+
+def test_cli_submit_ordering_bulk_semicolon_scores_100(db: Database, ordering_worksheet, monkeypatch):
+    monkeypatch.setattr("app.cli.main.default_db", db)
+    answers = "; ".join(ex.canonical_answer or "" for ex in ordering_worksheet.exercises)
+    result = runner.invoke(
+        app,
+        ["submit", ordering_worksheet.instance_id, "--answers", answers, "--no-confirm"],
+    )
+    assert result.exit_code == 0
+    assert "100.0%" in result.output
+
 

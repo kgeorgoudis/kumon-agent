@@ -8,6 +8,7 @@ Usage examples
   kumon generate multiplication-2-5 --exercises 20 --child "Ελένη"
   kumon submit <instance_id>
   kumon submit <instance_id> --answers "2,4,6,8" --time 12:30
+  kumon submit <instance_id> --answers "1 3 5 9; 20 14 8 2" --no-confirm
   kumon pending
   kumon pending --child "Ελένη"
   kumon progress --child "Ελένη"
@@ -514,7 +515,14 @@ def submit(
     ],
     answers: Annotated[
         Optional[str],
-        typer.Option("--answers", "-a", help="Bulk answers as comma-separated list."),
+        typer.Option(
+            "--answers",
+            "-a",
+            help=(
+                "Bulk answers list. Use commas/spaces for scalar worksheets. "
+                "For ordering worksheets, separate exercises with ';'."
+            ),
+        ),
     ] = None,
     time: Annotated[
         Optional[str],
@@ -539,6 +547,7 @@ def submit(
 
       kumon submit <instance_id>
       kumon submit <instance_id> --answers "2,4,6,8,10" --time 12:34
+      kumon submit <instance_id> --answers "1 3 5 9; 22 14 7 1" --no-confirm
       kumon submit <instance_id> --resume
     """
     # ── Validate duration early ───────────────────────────────────────────────

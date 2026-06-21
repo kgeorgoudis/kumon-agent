@@ -22,6 +22,7 @@ from app.domain.models import (
     ManualEntryMode,
     ManualSubmission,
     ManualSubmissionStatus,
+    MicroSkillId,
     PendingWorksheetRow,
 )
 from app.persistence.database import Database, default_db
@@ -119,6 +120,24 @@ def normalize_answer(raw_value: str) -> NormalizedAnswer:
     return NormalizedAnswer(raw_value=raw_value, normalized_value=value, is_valid=is_valid)
 
 
+def normalize_ordering_answer(raw_value: str) -> NormalizedAnswer:
+    """Normalize an ordering answer to a canonical space-joined integer sequence."""
+    tokens = re.findall(r"-?\d+", raw_value)
+    if len(tokens) < 2:
+        return NormalizedAnswer(raw_value=raw_value, normalized_value="", is_valid=False)
+    return NormalizedAnswer(
+        raw_value=raw_value,
+        normalized_value=" ".join(tokens),
+        is_valid=True,
+    )
+
+
+def _normalize_answer_for_exercise(raw_value: str, exercise) -> NormalizedAnswer:
+    if exercise.micro_skill_id == MicroSkillId.ORDERING_NUMBERS:
+        return normalize_ordering_answer(raw_value)
+    return normalize_answer(raw_value)
+
+
 def validate_answer(raw_value: str) -> str:
     """Return normalized answer string or raise invalid format error."""
     normalized = normalize_answer(raw_value)
@@ -129,7 +148,9 @@ def validate_answer(raw_value: str) -> str:
 
 def parse_bulk_answers(raw_answers: str, expected_count: int) -> list[str]:
     """Parse comma/whitespace separated answers and validate expected size."""
-    if "," in raw_answers:
+    if ";" in raw_answers:
+        parts = [part.strip() for part in raw_answers.split(";")]
+    elif "," in raw_answers:
         parts = [part.strip() for part in raw_answers.split(",")]
     else:
         parts = [part.strip() for part in raw_answers.split()]
@@ -242,7 +263,7 @@ def set_answers_on_draft(
 
     entries: list[ManualAnswerEntry] = []
     for idx, (raw, exercise) in enumerate(zip(raw_answers, worksheet.exercises)):
-        norm = normalize_answer(raw)
+        norm = _normalize_answer_for_exercise(raw, exercise)
         db.upsert_manual_answer_entry(
             submission_id=submission_id,
             exercise_id=exercise.exercise_id,
@@ -289,7 +310,7 @@ def update_single_answer(
         )
 
     exercise = worksheet.exercises[slot_index]
-    norm = normalize_answer(raw_value)
+    norm = _normalize_answer_for_exercise(raw_value, exercise)
     db.upsert_manual_answer_entry(
         submission_id=submission_id,
         exercise_id=exercise.exercise_id,
@@ -400,6 +421,7 @@ def confirm_and_score(
         norm_val = entry.normalized_value if entry else ""
         raw_val = entry.raw_value if entry else ""
         normalized_values.append(norm_val)
+        expected_answer = exercise.canonical_answer if exercise.micro_skill_id == MicroSkillId.ORDERING_NUMBERS else str(exercise.answer)
         entry_dicts.append(
             {
                 "exercise_id": exercise.exercise_id,
@@ -408,11 +430,14 @@ def confirm_and_score(
                 "normalized_value": norm_val,
                 "is_valid": entry.is_valid if entry else False,
                 "problem_text": exercise.problem_text,
-                "correct_answer": str(exercise.answer),
+                "correct_answer": expected_answer,
             }
         )
 
-    correct_answers = [str(ex.answer) for ex in worksheet.exercises]
+    correct_answers = [
+        ex.canonical_answer if ex.micro_skill_id == MicroSkillId.ORDERING_NUMBERS else str(ex.answer)
+        for ex in worksheet.exercises
+    ]
     correct_count, total_count = _score_answers(normalized_values, correct_answers)
     accuracy_pct = (correct_count / total_count * 100.0) if total_count else 0.0
 
@@ -453,6 +478,16 @@ def confirm_and_score(
         ManualSubmissionStatus.CONFIRMED,
         duration_seconds=duration_seconds,
     )
+
+    if worksheet.child_id:
+        from app.services.progression_service import evaluate_progression
+
+        evaluate_progression(
+            child_id=worksheet.child_id,
+            micro_skill_id=worksheet.micro_skill_id,
+            db=db,
+            persist=True,
+        )
 
     return SubmitOutcome(
         submission_id=submission_id,
@@ -501,6 +536,7 @@ def backfill_submission_snapshot(
         norm_val = entry.normalized_value if entry else ""
         raw_val = entry.raw_value if entry else ""
         normalized_values.append(norm_val)
+        expected_answer = exercise.canonical_answer if exercise.micro_skill_id == MicroSkillId.ORDERING_NUMBERS else str(exercise.answer)
         entry_dicts.append(
             {
                 "exercise_id": exercise.exercise_id,
@@ -508,11 +544,14 @@ def backfill_submission_snapshot(
                 "raw_value": raw_val,
                 "normalized_value": norm_val,
                 "is_valid": entry.is_valid if entry else False,
-                "correct_answer": str(exercise.answer),
+                "correct_answer": expected_answer,
             }
         )
 
-    correct_answers = [str(ex.answer) for ex in worksheet.exercises]
+    correct_answers = [
+        ex.canonical_answer if ex.micro_skill_id == MicroSkillId.ORDERING_NUMBERS else str(ex.answer)
+        for ex in worksheet.exercises
+    ]
     correct_count, total_count = _score_answers(normalized_values, correct_answers)
     accuracy_pct = (correct_count / total_count * 100.0) if total_count else 0.0
 
