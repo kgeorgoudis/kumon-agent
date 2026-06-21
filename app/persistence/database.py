@@ -37,6 +37,7 @@ from app.domain.models import (
     OcrValueSource,
     PendingWorksheetRow,
     ProgressWorksheetPoint,
+    ProgressDecision,
     ScoreResultSnapshot,
     SubmissionStatus,
     WorksheetInstance,
@@ -190,6 +191,23 @@ CREATE INDEX IF NOT EXISTS idx_score_snapshots_ocr
 CREATE UNIQUE INDEX IF NOT EXISTS uq_score_snapshots_ocr_hash
     ON score_result_snapshots (ocr_result_id, input_hash)
     WHERE ocr_result_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS progress_decisions (
+    decision_id          TEXT PRIMARY KEY,
+    child_id             TEXT NOT NULL,
+    from_micro_skill_id  TEXT NOT NULL,
+    next_micro_skill_id  TEXT NOT NULL,
+    action               TEXT NOT NULL,
+    reason               TEXT NOT NULL,
+    reason_el            TEXT NOT NULL,
+    accuracy_pct         REAL NOT NULL,
+    parent_override      INTEGER NOT NULL DEFAULT 0,
+    override_note        TEXT NOT NULL DEFAULT '',
+    created_at           TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_progress_decisions_child_skill
+    ON progress_decisions (child_id, from_micro_skill_id, created_at DESC);
 
 """
 
@@ -350,7 +368,11 @@ class Database:
     # ── WorksheetInstance ─────────────────────────────────────────────────────
 
     def save_worksheet_instance(self, instance: WorksheetInstance) -> None:
-        exercises_json = json.dumps([ex.model_dump(mode="json") for ex in instance.exercises])
+        # Keep optional fields in the serialized payload so extended exercise
+        # schemas (e.g., ordering metadata) round-trip without loss.
+        exercises_json = json.dumps(
+            [ex.model_dump(mode="json", exclude_none=False) for ex in instance.exercises]
+        )
         with self.connect() as conn:
             conn.execute(
                 """
@@ -1094,6 +1116,64 @@ class Database:
             )
             for row in rows
         ]
+
+    def save_progress_decision(self, decision: ProgressDecision) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO progress_decisions
+                    (decision_id, child_id, from_micro_skill_id, next_micro_skill_id,
+                     action, reason, reason_el, accuracy_pct,
+                     parent_override, override_note, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    decision.decision_id,
+                    decision.child_id,
+                    decision.from_micro_skill_id.value,
+                    decision.next_micro_skill_id.value,
+                    decision.action,
+                    decision.reason,
+                    decision.reason_el,
+                    decision.accuracy_pct,
+                    int(decision.parent_override),
+                    decision.override_note,
+                    _iso(decision.created_at),
+                ),
+            )
+
+    def get_latest_progress_decision(
+        self,
+        child_id: str,
+        micro_skill_id: MicroSkillId,
+    ) -> ProgressDecision | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT *
+                FROM progress_decisions
+                WHERE child_id = ? AND from_micro_skill_id = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (child_id, micro_skill_id.value),
+            ).fetchone()
+        if row is None:
+            return None
+
+        return ProgressDecision(
+            decision_id=row["decision_id"],
+            child_id=row["child_id"],
+            from_micro_skill_id=MicroSkillId(row["from_micro_skill_id"]),
+            next_micro_skill_id=MicroSkillId(row["next_micro_skill_id"]),
+            action=row["action"],
+            reason=row["reason"],
+            reason_el=row["reason_el"],
+            accuracy_pct=row["accuracy_pct"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            parent_override=bool(row["parent_override"]),
+            override_note=row["override_note"],
+        )
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

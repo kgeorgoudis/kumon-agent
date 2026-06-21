@@ -46,6 +46,9 @@ uv run kumon generate multiplication-2-5
 # Generate 20 exercises for a named child
 uv run kumon profile create "Ελένη" --age 10 --grade 4
 uv run kumon generate multiplication-6-9 --child "Ελένη" --exercises 15
+
+# Generate ordering numbers worksheet (deterministic with seed)
+uv run kumon generate ordering-numbers --exercises 10 --seed 42 --no-open
 ```
 
 The worksheet and its answer key are saved as HTML in `output/worksheets/<date>/`.
@@ -65,6 +68,9 @@ uv run kumon progress --child "Ελένη"
 uv run kumon submit <instance_id>
 uv run kumon submit <instance_id> --answers "1,2,3,4,5" --no-confirm
 uv run kumon submit <instance_id> --answers "1,2,3,4,5" --time 12:34 --no-confirm
+
+# Ordering worksheets: separate each exercise answer with ';'
+uv run kumon submit <instance_id> --answers "1 3 7 9; 20, 15, 8, 2; 5-6-8-11" --no-confirm
 ```
 
 Key behavior:
@@ -74,6 +80,7 @@ Key behavior:
 - ✅ Optional LLM narrative + suggestions with graceful fallback
 - ✅ Interactive one-by-one answer entry
 - ✅ Bulk answer entry with `--answers`
+- ✅ Ordering-sheet bulk entry with semicolon (`;`) exercise separators
 - ✅ Review/correction loop before confirmation
 - ✅ Optional timing capture with `--time`
 - ✅ Deterministic scoring with audit trail (`worksheet -> submission -> score`)
@@ -137,6 +144,7 @@ Options:
 | `subtraction-two-digit-no-borrow` | Αφαίρεση Διψήφιων | Subtraction | 2 |
 | `subtraction-with-borrowing` | Αφαίρεση με Δανεισμό | Subtraction | 3 |
 | `half-and-double` | Μισό και Διπλό | Number Sense | 1 |
+| `ordering-numbers` | Διάταξη Αριθμών | Number Sense | 2 |
 | `multiplication-2-5` | Πολλαπλασιασμός 2–5 | Multiplication | 4 |
 | `multiplication-6-9` | Πολλαπλασιασμός 6–9 | Multiplication | 6 |
 | `multiplication-mixed` | Μεικτοί Πίνακες 2–9 | Multiplication | 7 |

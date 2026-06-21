@@ -185,14 +185,19 @@ class Exercise(BaseModel):
     """
 
     exercise_id: str = Field(default_factory=_new_id)
-    operand_a: int | float
-    operand_b: int | float
-    operator: Operator
-    answer: int | float
+    # Arithmetic-only fields (optional for non-arithmetic items such as ordering tasks)
+    operand_a: int | float | None = None
+    operand_b: int | float | None = None
+    operator: Operator | None = None
+    answer: int | float | None = None
     # Display strings — formatted for the child
     problem_text: str  # e.g. "7 × 8 = ___"
     answer_text: str   # e.g. "7 × 8 = 56"
     micro_skill_id: MicroSkillId
+    # Optional sequence metadata for ordering exercises
+    prompt_numbers: list[int] | None = None
+    ordering_direction: Literal["ascending", "descending"] | None = None
+    canonical_answer: str | None = None
 
 
 class ChildProfile(BaseModel):

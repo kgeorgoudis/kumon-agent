@@ -187,6 +187,38 @@ def _gen_half_and_double(rng: random.Random) -> Exercise:
         return _exercise(a, 2, Operator.DIVIDE, a // 2, MicroSkillId.HALF_AND_DOUBLE)
 
 
+def _gen_ordering_numbers(rng: random.Random) -> Exercise:
+    """Generate an ordering exercise with 4-6 distinct numbers up to 1000."""
+    count = rng.randint(4, 6)
+    numbers: set[int] = set()
+    while len(numbers) < count:
+        numbers.add(rng.randint(1, 1000))
+
+    prompt_numbers = list(numbers)
+    rng.shuffle(prompt_numbers)
+
+    if rng.random() >= 0.5:
+        direction = "ascending"
+        direction_label = "Αύξουσα"
+        ordered = sorted(prompt_numbers)
+    else:
+        direction = "descending"
+        direction_label = "Φθίνουσα"
+        ordered = sorted(prompt_numbers, reverse=True)
+
+    prompt_text = ", ".join(str(n) for n in prompt_numbers)
+    canonical_answer = " ".join(str(n) for n in ordered)
+
+    return Exercise(
+        problem_text=f"{direction_label}: {prompt_text} -> ___",
+        answer_text=f"{direction_label}: {prompt_text} -> {canonical_answer}",
+        micro_skill_id=MicroSkillId.ORDERING_NUMBERS,
+        prompt_numbers=prompt_numbers,
+        ordering_direction=direction,
+        canonical_answer=canonical_answer,
+    )
+
+
 # ── Registry ──────────────────────────────────────────────────────────────────
 
 _GENERATORS: dict[MicroSkillId, Callable[[random.Random], Exercise]] = {
@@ -204,6 +236,7 @@ _GENERATORS: dict[MicroSkillId, Callable[[random.Random], Exercise]] = {
     MicroSkillId.DIVISION_6_9: _gen_division_6_9,
     MicroSkillId.DIVISION_MIXED: _gen_division_mixed,
     MicroSkillId.HALF_AND_DOUBLE: _gen_half_and_double,
+    MicroSkillId.ORDERING_NUMBERS: _gen_ordering_numbers,
 }
 
 
@@ -239,9 +272,10 @@ def generate_exercises(
         If no generator is registered for the given micro_skill_id.
     """
     if micro_skill_id not in _GENERATORS:
+        skill_name = getattr(micro_skill_id, "value", str(micro_skill_id))
         supported = ", ".join(k.value for k in _GENERATORS)
         raise ValueError(
-            f"No exercise generator for micro-skill '{micro_skill_id.value}'. "
+            f"No exercise generator for micro-skill '{skill_name}'. "
             f"Supported: {supported}"
         )
 

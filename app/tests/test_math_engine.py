@@ -11,6 +11,8 @@ Constitutional Principle I: Deterministic Before Agentic
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 
 from app.domain.math_engine import generate_exercises, supported_micro_skills
@@ -116,6 +118,30 @@ def test_half_and_double_answers_correct():
             assert ex.answer == ex.operand_a // ex.operand_b
 
 
+def test_ordering_numbers_exercises_have_distinct_values_and_direction():
+    exercises = generate_exercises(MicroSkillId.ORDERING_NUMBERS, count=30, seed=17)
+    for ex in exercises:
+        assert ex.micro_skill_id == MicroSkillId.ORDERING_NUMBERS
+        assert ex.prompt_numbers is not None
+        assert 4 <= len(ex.prompt_numbers) <= 6
+        assert len(set(ex.prompt_numbers)) == len(ex.prompt_numbers)
+        assert all(1 <= n <= 1000 for n in ex.prompt_numbers)
+        assert ex.ordering_direction in {"ascending", "descending"}
+        assert ex.canonical_answer is not None
+
+
+def test_ordering_numbers_canonical_answer_matches_direction():
+    exercises = generate_exercises(MicroSkillId.ORDERING_NUMBERS, count=20, seed=23)
+    for ex in exercises:
+        assert ex.prompt_numbers is not None
+        assert ex.canonical_answer is not None
+        tokens = [int(t) for t in ex.canonical_answer.split()]
+        if ex.ordering_direction == "ascending":
+            assert tokens == sorted(ex.prompt_numbers)
+        else:
+            assert tokens == sorted(ex.prompt_numbers, reverse=True)
+
+
 # ── Display text ──────────────────────────────────────────────────────────────
 
 
@@ -143,5 +169,5 @@ def test_all_supported_skills_generate_exercises():
 
 def test_unsupported_skill_raises():
     with pytest.raises(ValueError, match="No exercise generator"):
-        generate_exercises(MicroSkillId.ORDERING_NUMBERS)
+        generate_exercises(cast(MicroSkillId, "unsupported_skill"))
 

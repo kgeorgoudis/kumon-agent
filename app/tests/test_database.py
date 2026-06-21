@@ -10,6 +10,7 @@ import pytest
 
 from app.domain.models import (
     ChildProfile,
+    Exercise,
     ManualEntryMode,
     ManualSubmission,
     ManualSubmissionStatus,
@@ -20,6 +21,7 @@ from app.domain.models import (
     ScoreResultSnapshot,
     SubmissionStatus,
     WorksheetSubmission,
+    WorksheetInstance,
 )
 from app.persistence.database import Database
 from app.services.submission_service import confirm_and_score, set_answers_on_draft, start_submission
@@ -84,6 +86,37 @@ def test_save_worksheet_instance(db, tmp_output, child):
     assert retrieved is not None
     assert retrieved.micro_skill_id == MicroSkillId.MULTIPLICATION_2_5
     assert len(retrieved.exercises) == len(instance.exercises)
+
+
+def test_save_and_reload_ordering_exercise_roundtrip(db: Database):
+    ordering_exercise = Exercise(
+        micro_skill_id=MicroSkillId.ORDERING_NUMBERS,
+        problem_text="Αύξουσα: 17, 5, 42, 30 -> ___",
+        answer_text="Αύξουσα: 17, 5, 42, 30 -> 5 17 30 42",
+        prompt_numbers=[17, 5, 42, 30],
+        ordering_direction="ascending",
+        canonical_answer="5 17 30 42",
+    )
+    instance = WorksheetInstance(
+        micro_skill_id=MicroSkillId.ORDERING_NUMBERS,
+        exercises=[ordering_exercise],
+        title_el="Διάταξη Αριθμών",
+        instructions_el="Βάλε τους αριθμούς σε σειρά.",
+        seed=123,
+    )
+
+    db.save_worksheet_instance(instance)
+    loaded = db.get_worksheet_instance(instance.instance_id)
+
+    assert loaded is not None
+    assert loaded.micro_skill_id == MicroSkillId.ORDERING_NUMBERS
+    assert len(loaded.exercises) == 1
+    ex = loaded.exercises[0]
+    assert ex.prompt_numbers == [17, 5, 42, 30]
+    assert ex.ordering_direction == "ascending"
+    assert ex.canonical_answer == "5 17 30 42"
+    assert ex.operator is None
+    assert ex.answer is None
 
 
 def test_get_worksheet_instance_not_found(db):
@@ -360,5 +393,38 @@ def test_list_progress_points_excludes_confirmed_with_no_snapshot(db, tmp_output
 
     rows = db.list_progress_points(child_id=child.child_id)
     assert rows == []
+
+
+def test_ordering_submission_snapshot_details_store_canonical_answers(db: Database, tmp_output):
+    ws = generate_worksheet(MicroSkillId.ORDERING_NUMBERS, count=3, seed=88)
+    db.save_worksheet_instance(ws)
+
+    submission = start_submission(ws.instance_id, db=db)
+    answers = [ex.canonical_answer or "" for ex in ws.exercises]
+    set_answers_on_draft(submission.submission_id, answers, db=db)
+    outcome = confirm_and_score(submission.submission_id, db=db)
+
+    snapshot = db.get_score_snapshot_by_submission_hash(submission.submission_id, outcome.input_hash)
+    assert snapshot is not None
+    assert '"mode": "manual_deterministic"' in snapshot.details_json
+    for ex in ws.exercises:
+        assert (ex.canonical_answer or "") in snapshot.details_json
+
+
+def test_list_progress_points_includes_ordering_numbers_rows(db: Database, tmp_output):
+    child = ChildProfile(child_id="ordering-progress", display_name="Διάταξη", age=10, grade_level=4)
+    db.save_child_profile(child)
+
+    ws = generate_worksheet(MicroSkillId.ORDERING_NUMBERS, child=child, count=4, seed=90)
+    db.save_worksheet_instance(ws)
+    submission = start_submission(ws.instance_id, db=db)
+    answers = [ex.canonical_answer or "" for ex in ws.exercises]
+    set_answers_on_draft(submission.submission_id, answers, db=db)
+    confirm_and_score(submission.submission_id, db=db)
+
+    rows = db.list_progress_points(child_id=child.child_id)
+    assert len(rows) == 1
+    assert rows[0].micro_skill_id == MicroSkillId.ORDERING_NUMBERS.value
+    assert rows[0].accuracy_pct == 100.0
 
 

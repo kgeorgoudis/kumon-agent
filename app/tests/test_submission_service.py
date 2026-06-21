@@ -55,6 +55,13 @@ def worksheet(db: Database, tmp_output):
     return ws
 
 
+@pytest.fixture()
+def ordering_worksheet(db: Database, tmp_output):
+    ws = generate_worksheet(MicroSkillId.ORDERING_NUMBERS, count=3, seed=31)
+    db.save_worksheet_instance(ws)
+    return ws
+
+
 # ── Phase 2 foundational helpers ──────────────────────────────────────────────
 
 def test_normalize_answer_accepts_decimal_comma_and_fraction():
@@ -78,6 +85,11 @@ def test_parse_bulk_answers_validates_count():
 
     with pytest.raises(AnswerCountMismatchError):
         parse_bulk_answers("1,2", expected_count=3)
+
+
+def test_parse_bulk_answers_accepts_semicolon_delimiter():
+    parsed = parse_bulk_answers("1 2 3; 4 5 6; 7 8 9", expected_count=3)
+    assert parsed == ["1 2 3", "4 5 6", "7 8 9"]
 
 
 def test_parse_duration_to_seconds_formats():
@@ -339,4 +351,30 @@ def test_confirm_without_timing_is_valid(db: Database, worksheet):
     set_answers_on_draft(sub.submission_id, ["999"] * len(worksheet.exercises), db=db)
     outcome = confirm_and_score(sub.submission_id, db=db)
     assert outcome.duration_seconds is None
+
+
+def test_confirm_and_score_ordering_sequences_correct(db: Database, ordering_worksheet):
+    sub = start_submission(ordering_worksheet.instance_id, db=db)
+    correct_answers = [ex.canonical_answer or "" for ex in ordering_worksheet.exercises]
+    set_answers_on_draft(sub.submission_id, correct_answers, db=db)
+    outcome = confirm_and_score(sub.submission_id, db=db)
+
+    assert outcome.correct_count == len(ordering_worksheet.exercises)
+    assert outcome.total_count == len(ordering_worksheet.exercises)
+    assert outcome.accuracy_pct == 100.0
+
+
+def test_confirm_and_score_ordering_sequences_wrong_order(db: Database, ordering_worksheet):
+    sub = start_submission(ordering_worksheet.instance_id, db=db)
+    wrong_answers: list[str] = []
+    for ex in ordering_worksheet.exercises:
+        nums = list(reversed(ex.prompt_numbers or []))
+        wrong_answers.append(" ".join(str(n) for n in nums))
+
+    set_answers_on_draft(sub.submission_id, wrong_answers, db=db)
+    outcome = confirm_and_score(sub.submission_id, db=db)
+
+    assert outcome.total_count == len(ordering_worksheet.exercises)
+    assert outcome.correct_count < len(ordering_worksheet.exercises)
+
 
