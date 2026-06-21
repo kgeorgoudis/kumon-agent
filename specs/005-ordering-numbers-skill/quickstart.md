@@ -56,3 +56,7 @@ Run the focused regression suite after implementation:
   - `uv run pytest -q app/tests/test_math_engine.py app/tests/test_worksheet_generator.py app/tests/test_submission_service.py app/tests/test_cli_submit.py app/tests/test_progression_service.py app/tests/test_database.py`
   - Result: `92 passed`
 
+- Focused run (2026-06-21):
+  - `uv run pytest -q app/tests/test_math_engine.py app/tests/test_worksheet_generator.py app/tests/test_submission_service.py app/tests/test_cli_submit.py app/tests/test_progression_service.py app/tests/test_database.py`
+  - Result: `92 passed`
+

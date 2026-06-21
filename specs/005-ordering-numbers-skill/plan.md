@@ -1,6 +1,6 @@
 # Implementation Plan: Ordering Numbers Skill
 
-**Branch**: `main` | **Date**: 2026-06-19 | **Spec**: `specs/005-ordering-numbers-skill/spec.md`
+**Branch**: `main` | **Date**: 2026-06-21 | **Spec**: `specs/005-ordering-numbers-skill/spec.md`
 
 **Input**: Feature specification from `/specs/005-ordering-numbers-skill/spec.md`
 
@@ -31,6 +31,7 @@ Implement the missing `ordering_numbers` micro-skill end to end by adding a dete
 - All generation and scoring logic must remain deterministic Python code (`Principles I-II`).
 - Child-facing worksheet instructions and rendered problem text must default to Greek (`Principle VII`).
 - Feature must work fully offline with existing local persistence and rendering stack (`Principle VIII`).
+- If optional LLM narrative is later used to describe ordering progress, it must run under the Kumon Tutor Persona and remain grounded in deterministic scoring payloads (`Principle XI`).
 - Existing arithmetic worksheet generation and scalar-answer submission flows must remain backward compatible.
 - Current manual submission parsing/scoring assumes one scalar answer per exercise; this feature must extend that path to sequence answers without introducing LLM dependencies.
 
@@ -55,11 +56,13 @@ Implement the missing `ordering_numbers` micro-skill end to end by adding a dete
 - **VIII. Local-First Architecture**: PASS - uses existing local SQLite + HTML rendering only.
 - **IX. Shared Domain Logic**: PASS - generation lives in `app/domain/`, submission/scoring in shared services, reused by CLI and future web routes.
 - **X. In-App Documentation**: PASS - no new documentation principle violations; skill already exists in knowledge base and implementation will bring behavior in line with documented availability.
+- **XI. Kumon Tutor Persona**: PASS - feature remains deterministic and does not introduce LLM calls; any downstream narrative about ordering results continues to inherit persona constraints from the shared progress-report pipeline.
 
 ### Post-Design Re-Check
 
 - PASS - design extends the shared `Exercise` representation instead of introducing a parallel one-off path.
 - PASS - manual scoring remains deterministic and inspectable through canonical normalized sequence strings in score snapshots.
+- PASS - no persona drift risk introduced because the feature adds no direct LLM orchestration path.
 - PASS - no constitution violations identified; Complexity Tracking exceptions not required.
 
 ## Phase 0: Research Plan

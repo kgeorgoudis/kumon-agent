@@ -10,6 +10,7 @@ from app.persistence.database import Database
 from app.services.progress_summary_service import (
     build_progress_report,
     classify_accuracy_trend,
+    load_progress_prompt,
 )
 from app.services.submission_service import (
     confirm_and_score,
@@ -149,4 +150,35 @@ def test_build_progress_report_llm_unavailable_fallback(monkeypatch, db: Databas
     assert report.narrative_status == "degraded"
     assert report.llm_error_code == "ERR_LLM_UNAVAILABLE"
     assert report.suggestions
+
+
+def test_load_progress_prompt_includes_kumon_tutor_persona():
+    prompt = load_progress_prompt()
+    assert "Prompt: kumon_tutor_persona - v1" in prompt
+    assert "έμπειρος/η εκπαιδευτικός Kumon" in prompt
+
+
+def test_build_progress_report_invalid_worksheet_type_is_sanitized(monkeypatch, db: Database, tmp_output):
+    child = ChildProfile(child_id="llm-sanitize", display_name="Άννα", age=10, grade_level=4)
+    db.save_child_profile(child)
+    _seed_confirmed_sheet(db, child, MicroSkillId.ADDITION_SINGLE_DIGIT, seed=701)
+
+    fake_json = (
+        '{"summary_el":"Υπάρχει πρόοδος.",'
+        '"suggestions":[{"target_micro_skill_id":"addition_single_digit",'
+        '"suggested_worksheet_type":"free_chat",'
+        '"rationale_el":"Συνέχισε σταδιακά.",'
+        '"confidence":"medium"}]}'
+    )
+    monkeypatch.setattr(
+        "app.services.progress_summary_service.get_llm_client",
+        lambda: _FakeClient(fake_json),
+    )
+
+    report = build_progress_report(child=child, include_narrative=True, db=db)
+
+    assert report.narrative_status == "generated"
+    assert report.suggestions
+    assert report.suggestions[0].suggested_worksheet_type is None
+
 

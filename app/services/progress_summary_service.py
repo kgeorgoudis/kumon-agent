@@ -23,8 +23,10 @@ from app.domain.models import (
 )
 from app.persistence.database import Database, default_db
 
-PROMPT_VERSION = "v1/progress_summary"
+PROMPT_VERSION = "v1/kumon_tutor_progress_summary"
 PROMPT_PATH = Path(__file__).parent.parent / "prompts" / "v1" / "progress_summary.md"
+PERSONA_PROMPT_PATH = Path(__file__).parent.parent / "prompts" / "v1" / "kumon_tutor_persona.md"
+_ALLOWED_WORKSHEET_TYPES = {"drill", "mixed_review", "correction", "concept_reinforcement", "timed_fluency"}
 
 
 def classify_accuracy_trend(values: list[float], delta_threshold: float = 3.0) -> str:
@@ -47,8 +49,10 @@ def classify_accuracy_trend(values: list[float], delta_threshold: float = 3.0) -
 
 
 def load_progress_prompt() -> str:
-    """Load the versioned prompt template for progress narrative generation."""
-    return PROMPT_PATH.read_text(encoding="utf-8")
+    """Load persona + task prompt for progress narrative generation."""
+    persona = PERSONA_PROMPT_PATH.read_text(encoding="utf-8").strip()
+    task_prompt = PROMPT_PATH.read_text(encoding="utf-8").strip()
+    return f"{persona}\n\n{task_prompt}"
 
 
 def _find_next_possible_skills(practiced_skill_ids: set[str]) -> dict[str, object]:
@@ -232,14 +236,17 @@ def _validate_suggestions(
             target = str(target)
             if target not in known_skills:
                 target = None
+        worksheet_type = item.get("suggested_worksheet_type")
+        worksheet_type_normalized = None
+        if worksheet_type is not None:
+            candidate = str(worksheet_type).strip().lower()
+            if candidate in _ALLOWED_WORKSHEET_TYPES:
+                worksheet_type_normalized = candidate
+
         suggestions.append(
             ProgressSuggestion(
                 target_micro_skill_id=target,
-                suggested_worksheet_type=(
-                    str(item.get("suggested_worksheet_type"))
-                    if item.get("suggested_worksheet_type") is not None
-                    else None
-                ),
+                suggested_worksheet_type=worksheet_type_normalized,
                 rationale_el=rationale,
                 confidence=(
                     str(item.get("confidence"))
