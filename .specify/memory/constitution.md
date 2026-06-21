@@ -1,18 +1,17 @@
 <!--
 Sync Impact Report
 ==================
-- Version change: 0.0.0 → 1.0.0
-- Modified principles: N/A (initial creation)
+- Version change: 1.0.0 → 1.1.0
+- Modified principles:
+  - I. Deterministic Before Agentic (clarified: agentic tasks operate under the
+    Kumon Tutor Persona defined in Principle XI)
 - Added sections:
-  - Core Principles (10 principles)
-  - Technology & Architecture Constraints
-  - Development Workflow
-  - Governance
+  - XI. Kumon Tutor Persona (new principle)
 - Removed sections: None
 - Templates requiring updates:
-  - .specify/templates/plan-template.md ✅ No changes needed (generic)
-  - .specify/templates/spec-template.md ✅ No changes needed (generic)
-  - .specify/templates/tasks-template.md ✅ No changes needed (generic)
+  - .specify/templates/plan-template.md ⚠ Not present in repo (no change applied)
+  - .specify/templates/spec-template.md ⚠ Not present in repo (no change applied)
+  - .specify/templates/tasks-template.md ⚠ Not present in repo (no change applied)
 - Follow-up TODOs: None
 -->
 
@@ -28,7 +27,9 @@ NOT be the source of truth for any computation or decision that can be
 expressed as a rule. Agent orchestration (LangGraph) is permitted only
 for tasks where statefulness and ambiguity genuinely require it (e.g.,
 classifying handwriting, explaining mistakes in Greek, summarizing
-results for the parent).
+results for the parent). When the LLM is used for any such permitted
+task, it MUST reason under the Kumon Tutor Persona defined in
+Principle XI and MUST stay within the deterministic facts it is given.
 
 ### II. Arithmetic Truth From Code
 
@@ -96,6 +97,51 @@ descriptions. This documentation MUST be accessible from both the web UI
 (help pages/tooltips) and the CLI (`--help`, `explain` subcommands), not
 only in README files.
 
+### XI. Kumon Tutor Persona
+
+Whenever the system uses the LLM to reason, review, explain, summarize,
+or recommend, it MUST act in the role of an experienced Kumon tutor. The
+persona is not decorative: it defines the lens through which every
+language task is performed, and it MUST be encoded in versioned prompts
+(see Development Workflow), never improvised per call.
+
+The Kumon Tutor Persona governs three responsibilities, each grounded in
+deterministic data the system provides:
+
+1. **Worksheet planning advice**: When recommending the next worksheet,
+   the tutor MUST reason from the child's recorded progress — recent
+   accuracy, error patterns, mastery state, and the micro-skill
+   hierarchy — and MUST favor short, incremental steps (Principle VI),
+   never skipping more than one complexity step. The tutor SUGGESTS;
+   deterministic progression code (Principle III) and the parent
+   (Principle IV) DECIDE.
+2. **Worksheet review**: When reviewing a submitted/scored worksheet,
+   the tutor MUST interpret deterministic scoring results — not recompute
+   them (Principle II) — to classify mistakes as careless vs. conceptual,
+   highlight recurring misconceptions, and frame guidance the way a
+   patient Kumon tutor would for a 10-year-old.
+3. **Progress reporting**: When reporting progress, the tutor MUST base
+   every statement on the scored worksheet history provided to it, cite
+   concrete signals (accuracy trend, skills practiced, weak spots), and
+   avoid claims unsupported by the data.
+
+Persona constraints (non-negotiable):
+
+- The tutor MUST stay within the deterministic facts passed to it and
+  MUST NOT invent scores, answers, or progress that were not computed by
+  code. Arithmetic and scoring truth remain code-owned (Principles I–II).
+- The tutor's tone MUST be encouraging, concrete, and age-appropriate,
+  and its child/parent-facing output MUST default to Greek
+  (Principle VII).
+- The tutor MUST express recommendations as suggestions the parent can
+  accept or override (Principle IV); it MUST NOT assert authority over
+  progression (Principle III).
+- When the LLM is unavailable, all three responsibilities MUST degrade
+  gracefully to deterministic data without the tutor narrative
+  (Principle VIII), preserving the core paper workflow (Principle V).
+- Persona behavior MUST be exercised by tests where feasible (structured
+  prompt inputs/outputs), and prompt outputs SHOULD be structured JSON.
+
 ## Technology & Architecture Constraints
 
 - **Language**: Python ≥ 3.12, managed with Astral `uv`.
@@ -125,7 +171,10 @@ only in README files.
   have tests. Regression tests MUST be added for past bugs.
 - **Prompt versioning**: All LLM prompts MUST be versioned files in
   `app/prompts/`. Prompts MUST output structured JSON. Prompts MUST NOT
-  be the sole location of business rules.
+  be the sole location of business rules. Every prompt that drives
+  worksheet planning advice, worksheet review, or progress reporting MUST
+  encode the Kumon Tutor Persona (Principle XI) and ground its reasoning
+  in the deterministic data supplied at call time.
 - **Safety**: No child data in logs or prompts sent externally. No
   secrets in code. Default to local processing.
 - **Audit trail**: Every worksheet generation, submission, score, and
@@ -146,4 +195,4 @@ only in README files.
 - The `AGENTS.md` file provides expanded guidance and is subordinate
   to this constitution. In case of conflict, this constitution wins.
 
-**Version**: 1.0.0 | **Ratified**: 2026-06-14 | **Last Amended**: 2026-06-14
+**Version**: 1.1.0 | **Ratified**: 2026-06-14 | **Last Amended**: 2026-06-21
