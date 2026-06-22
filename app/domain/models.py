@@ -21,7 +21,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -327,6 +327,8 @@ class ProgressReport(BaseModel):
     suggestions: list[ProgressSuggestion] = Field(default_factory=list)
     llm_error_code: str | None = None
     prompt_version: str = "v1/progress_summary"
+    task_id: str | None = None
+    trace_summary: dict[str, Any] = Field(default_factory=dict)
 
 
 class ScoreResultSnapshot(BaseModel):
@@ -339,3 +341,78 @@ class ScoreResultSnapshot(BaseModel):
     accuracy_pct: float
     details_json: str
     created_at: datetime = Field(default_factory=_now)
+
+
+class TutorTaskType(str, Enum):
+    """Supported tutor orchestration task types."""
+
+    PROGRESS_REPORT = "progress_report"
+    WORKSHEET_REVIEW = "worksheet_review"
+    NEXT_STEP_PLANNING = "next_step_planning"
+
+
+class TutorTaskStatus(str, Enum):
+    """Lifecycle status for one tutor orchestration run."""
+
+    INITIALIZED = "initialized"
+    GROUNDING = "grounding"
+    REASONING = "reasoning"
+    VALIDATING = "validating"
+    COMPLETED = "completed"
+    DEGRADED = "degraded"
+    FAILED = "failed"
+
+
+class TutorStepStatus(str, Enum):
+    """Execution status for one graph step."""
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+class TutorTaskState(BaseModel):
+    """Persistable state record for one orchestrated tutor task run."""
+
+    task_id: str = Field(default_factory=_new_id)
+    task_type: TutorTaskType
+    child_id: str | None = None
+    prompt_version: str
+    status: TutorTaskStatus = TutorTaskStatus.INITIALIZED
+    deterministic_context: dict[str, Any] = Field(default_factory=dict)
+    model_context: dict[str, Any] = Field(default_factory=dict)
+    output: dict[str, Any] = Field(default_factory=dict)
+    error_code: str | None = None
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+
+class TutorStepTrace(BaseModel):
+    """Persistable trace row for a single orchestration step."""
+
+    step_id: str = Field(default_factory=_new_id)
+    task_id: str
+    step_name: str
+    status: TutorStepStatus = TutorStepStatus.QUEUED
+    input_snapshot: dict[str, Any] = Field(default_factory=dict)
+    output_snapshot: dict[str, Any] = Field(default_factory=dict)
+    error_code: str | None = None
+    started_at: datetime = Field(default_factory=_now)
+    finished_at: datetime | None = None
+
+
+class TutorOutcome(BaseModel):
+    """Normalized output envelope returned from tutor orchestration."""
+
+    task_id: str
+    summary_el: str | None = None
+    suggestions: list[dict[str, Any]] = Field(default_factory=list)
+    deterministic_metrics: dict[str, Any] = Field(default_factory=dict)
+    narrative_status: Literal["generated", "degraded", "not_requested"] = "not_requested"
+    validation_status: Literal["trusted", "sanitized", "fallback"] = "trusted"
+    error_code: str | None = None
+    prompt_version: str | None = None
+    trace_summary: dict[str, Any] = Field(default_factory=dict)
+

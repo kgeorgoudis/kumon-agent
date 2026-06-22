@@ -76,7 +76,7 @@ def test_progress_page_degraded_mode_banner(test_client: TestClient, db: Databas
     def _raise_client():
         raise RuntimeError("offline")
 
-    monkeypatch.setattr("app.services.progress_summary_service.get_llm_client", _raise_client)
+    monkeypatch.setattr("app.agents.agent_graph.get_llm_client", _raise_client)
 
     response = test_client.get("/progress", params={"child": "Ελένη", "llm": "true"})
 

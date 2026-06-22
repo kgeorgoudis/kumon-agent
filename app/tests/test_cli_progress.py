@@ -81,7 +81,7 @@ def test_cli_progress_llm_degraded_warning(db: Database, tmp_output, monkeypatch
     def _raise_client():
         raise RuntimeError("offline")
 
-    monkeypatch.setattr("app.services.progress_summary_service.get_llm_client", _raise_client)
+    monkeypatch.setattr("app.agents.agent_graph.get_llm_client", _raise_client)
 
     result = runner.invoke(app, ["progress", "--child", "Ελένη"])
 

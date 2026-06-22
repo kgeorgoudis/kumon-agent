@@ -481,6 +481,14 @@ def progress(
                 cmd = f"kumon generate {suggestion.target_micro_skill_id} -c {profile.child_id}"
                 console.print(f"     [dim]→ Εντολή: {cmd}[/dim]")
 
+    if report.task_id or report.prompt_version:
+        trace_steps = report.trace_summary.get("step_names", []) if report.trace_summary else []
+        trace_suffix = f" | βήματα: {', '.join(trace_steps)}" if trace_steps else ""
+        run_suffix = f" | run: {report.task_id[:8]}…" if report.task_id else ""
+        console.print(
+            f"[dim]Tutor graph: {report.prompt_version}{run_suffix}{trace_suffix}[/dim]"
+        )
+
 
 
 def _format_duration(seconds: int) -> str:

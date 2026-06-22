@@ -54,21 +54,6 @@ def _seed_confirmed_sheet(
     confirm_and_score(sub.submission_id, db=db)
 
 
-class _FakeCompletions:
-    def __init__(self, content: str):
-        self._content = content
-
-    def create(self, **kwargs):
-        message = type("M", (), {"content": self._content})
-        choice = type("C", (), {"message": message})
-        return type("R", (), {"choices": [choice]})
-
-
-class _FakeClient:
-    def __init__(self, content: str):
-        self.chat = type("Chat", (), {"completions": _FakeCompletions(content)})
-
-
 def test_classify_accuracy_trend_insufficient_data():
     assert classify_accuracy_trend([95.0]) == "insufficient_data"
 
@@ -108,7 +93,7 @@ def test_build_progress_report_no_data_message(db: Database, tmp_output):
     assert "Δεν υπάρχουν ακόμη βαθμολογημένα φύλλα" in (report.summary_el or "")
 
 
-def test_build_progress_report_llm_success(monkeypatch, db: Database, tmp_output):
+def test_build_progress_report_llm_success(monkeypatch, db: Database, tmp_output, make_fake_llm_client):
     child = ChildProfile(child_id="llm-ok", display_name="Μαρία", age=10, grade_level=4)
     db.save_child_profile(child)
     _seed_confirmed_sheet(db, child, MicroSkillId.ADDITION_SINGLE_DIGIT, seed=501)
@@ -122,8 +107,8 @@ def test_build_progress_report_llm_success(monkeypatch, db: Database, tmp_output
         '"confidence":"high"}]}'
     )
     monkeypatch.setattr(
-        "app.services.progress_summary_service.get_llm_client",
-        lambda: _FakeClient(fake_json),
+        "app.agents.agent_graph.get_llm_client",
+        lambda: make_fake_llm_client(fake_json),
     )
 
     report = build_progress_report(child=child, include_narrative=True, db=db)
@@ -132,6 +117,8 @@ def test_build_progress_report_llm_success(monkeypatch, db: Database, tmp_output
     assert "Καλή πορεία" in (report.summary_el or "")
     assert report.suggestions
     assert report.suggestions[0].target_micro_skill_id == "addition_single_digit"
+    assert report.task_id is not None
+    assert report.trace_summary["step_count"] == 3
 
 
 def test_build_progress_report_llm_unavailable_fallback(monkeypatch, db: Database, tmp_output):
@@ -143,7 +130,7 @@ def test_build_progress_report_llm_unavailable_fallback(monkeypatch, db: Databas
     def _raise_client():
         raise RuntimeError("offline")
 
-    monkeypatch.setattr("app.services.progress_summary_service.get_llm_client", _raise_client)
+    monkeypatch.setattr("app.agents.agent_graph.get_llm_client", _raise_client)
 
     report = build_progress_report(child=child, include_narrative=True, db=db)
 
@@ -158,7 +145,7 @@ def test_load_progress_prompt_includes_kumon_tutor_persona():
     assert "έμπειρος/η εκπαιδευτικός Kumon" in prompt
 
 
-def test_build_progress_report_invalid_worksheet_type_is_sanitized(monkeypatch, db: Database, tmp_output):
+def test_build_progress_report_invalid_worksheet_type_is_sanitized(monkeypatch, db: Database, tmp_output, make_fake_llm_client):
     child = ChildProfile(child_id="llm-sanitize", display_name="Άννα", age=10, grade_level=4)
     db.save_child_profile(child)
     _seed_confirmed_sheet(db, child, MicroSkillId.ADDITION_SINGLE_DIGIT, seed=701)
@@ -171,8 +158,8 @@ def test_build_progress_report_invalid_worksheet_type_is_sanitized(monkeypatch, 
         '"confidence":"medium"}]}'
     )
     monkeypatch.setattr(
-        "app.services.progress_summary_service.get_llm_client",
-        lambda: _FakeClient(fake_json),
+        "app.agents.agent_graph.get_llm_client",
+        lambda: make_fake_llm_client(fake_json),
     )
 
     report = build_progress_report(child=child, include_narrative=True, db=db)
@@ -180,5 +167,29 @@ def test_build_progress_report_invalid_worksheet_type_is_sanitized(monkeypatch, 
     assert report.narrative_status == "generated"
     assert report.suggestions
     assert report.suggestions[0].suggested_worksheet_type is None
+
+
+def test_build_progress_report_conflicting_numeric_summary_falls_back(monkeypatch, db: Database, tmp_output, make_fake_llm_client):
+    child = ChildProfile(child_id="llm-conflict", display_name="Άννα", age=10, grade_level=4)
+    db.save_child_profile(child)
+    _seed_confirmed_sheet(db, child, MicroSkillId.ADDITION_SINGLE_DIGIT, seed=801)
+
+    fake_json = (
+        '{"summary_el":"Η ακρίβεια είναι 100% και έγιναν 4 σωστές απαντήσεις.",'
+        '"suggestions":[{"target_micro_skill_id":"addition_single_digit",'
+        '"suggested_worksheet_type":"drill",'
+        '"rationale_el":"Συνέχισε σταδιακά.",'
+        '"confidence":"medium"}]}'
+    )
+    monkeypatch.setattr(
+        "app.agents.agent_graph.get_llm_client",
+        lambda: make_fake_llm_client(fake_json),
+    )
+
+    report = build_progress_report(child=child, include_narrative=True, db=db)
+
+    assert report.narrative_status == "degraded"
+    assert report.llm_error_code == "ERR_LLM_CONFLICTING_FACTS"
+    assert "Η αφήγηση LLM δεν ήταν διαθέσιμη" in (report.summary_el or "")
 
 
