@@ -22,6 +22,9 @@ def report_context(report: ProgressReport) -> dict[str, object]:
         "overall_trend_label": trend_label_el(report.overall_trend),
         "narrative_warning": report.narrative_status == "degraded",
         "is_empty": report.worksheet_count == 0,
+        "prompt_version": report.prompt_version,
+        "task_id": report.task_id,
+        "trace_steps": report.trace_summary.get("step_names", []) if report.trace_summary else [],
         "skill_rows": [
             {
                 "micro_skill_id": row.micro_skill_id,

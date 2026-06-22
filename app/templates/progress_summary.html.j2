@@ -47,6 +47,14 @@
         <div class="warn">Η αφήγηση LLM δεν ήταν διαθέσιμη. Εμφανίζονται μόνο ντετερμινιστικά δεδομένα.</div>
       {% endif %}
 
+      {% if prompt_version or task_id %}
+        <p class="muted">
+          Tutor graph: {{ prompt_version }}
+          {% if task_id %} | run: {{ task_id[:8] }}…{% endif %}
+          {% if trace_steps %} | βήματα: {{ trace_steps|join(', ') }}{% endif %}
+        </p>
+      {% endif %}
+
       <h2>Επίδοση ανά δεξιότητα</h2>
       <table>
         <thead>

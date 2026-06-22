@@ -164,20 +164,29 @@ app/
 │   ├── knowledge_base.py   # Embedded Kumon documentation (explain commands)
 │   └── math_engine.py      # Deterministic arithmetic problem generation
 ├── services/
-│   └── worksheet_generator.py  # Orchestrates generation + HTML rendering
+│   ├── worksheet_generator.py  # Orchestrates generation + HTML rendering
+│   ├── progress_summary_service.py  # Deterministic report + tutor graph facade
+│   ├── worksheet_review_service.py  # Grounded worksheet review facade
+│   └── tutor_planning_service.py    # Grounded next-step planning facade
 ├── persistence/
-│   └── database.py         # SQLite storage (append-only, no hidden state)
+│   └── database.py         # SQLite storage + agent run/step traces
 ├── templates/
 │   ├── worksheet.html.j2   # Printable worksheet template (Greek, A4)
 │   └── answer_key.html.j2  # Answer key template
 ├── agents/
-│   └── llm_client.py       # Local LLM client (OpenAI-compatible)
+│   ├── llm_client.py       # Local LLM client (OpenAI-compatible)
+│   ├── agent_graph.py      # LangGraph tutor orchestration
+│   ├── tools.py            # Deterministic tool wrappers
+│   └── traces.py           # Agent run/step trace helpers
 ├── prompts/v1/
-│   └── explain_mistake.md  # Versioned LLM prompt
+│   ├── progress_summary.md     # Tutor progress narrative contract
+│   ├── worksheet_review.md     # Tutor worksheet review contract
+│   ├── next_step_planning.md   # Tutor planning contract
+│   └── explain_mistake.md      # Versioned LLM prompt
 ├── cli/
 │   └── main.py             # Typer CLI (entry point: `kumon`)
 ├── api/                    # FastAPI stub (Milestone 2+)
-└── tests/                  # pytest test suite (39 tests, all passing)
+└── tests/                  # pytest test suite (includes LangGraph regressions)
 ```
 
 ### Key design decisions
@@ -189,14 +198,17 @@ app/
 | SQLite + raw sqlite3 | Zero extra dependencies, easy to inspect |
 | Fixed random seed stored | Worksheets can be regenerated identically |
 | Greek strings separate from code | Code/logs stay in English; content in Greek |
+| LangGraph for tutor orchestration | Explicit state/steps/tools without moving arithmetic truth into prompts |
 
 ---
 
 ## Local LLM Configuration
 
-The app uses a local LLM (Qwen3-8B-MLX-4bit) for optional tasks only
-(explaining mistakes in Greek, summarising results).  The core worksheet
-loop works **without** the LLM.
+The app uses a local LLM (Qwen3-8B-MLX-4bit) for optional tutor tasks only
+(progress summaries, worksheet review language, next-step advice). These
+tasks run through a LangGraph orchestration layer that is grounded in
+deterministic Python data and degrades gracefully when the model is offline.
+The core worksheet loop works **without** the LLM.
 
 Default endpoint: `http://127.0.0.1:8000/v1`
 
@@ -391,16 +403,16 @@ Follows a written [constitution](.specify/memory/constitution.md) for governance
 ### Getting Help
 
 ```bash
-kumon --help
-kumon explain method    # Kumon method overview
-kumon explain skill multiplication   # Skill details
-kumon list-skills --verbose          # All skills with descriptions
+uv run kumon --help
+uv run kumon explain method    # Kumon method overview
+uv run kumon explain skill multiplication   # Skill details
+uv run kumon list-skills --verbose          # All skills with descriptions
 ```
 
-See [README.md](README.md), [AGENTS.md](AGENTS.md), and `.specify/memory/constitution.md` for deeper context.
+See [README.md](README.md) and `.specify/memory/constitution.md` for deeper context.
 
 ### Next Steps (Roadmap)
 
-- **v0.2.0 (M2)**: Photo upload → OCR → scoring engine
+- **v0.2.0 (M2)**: Manual submission workflow → deterministic scoring → progress summary
 - **v0.3.0 (M3)**: Mastery tracking → progression planner → parent dashboard
 - **v0.4.0 (M4)**: LLM-powered explanations in Greek, evaluation harness

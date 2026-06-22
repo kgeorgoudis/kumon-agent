@@ -25,6 +25,16 @@ def _previous_skill(micro_skill_id: MicroSkillId) -> MicroSkillId:
     return ordered[idx - 1] if idx > 0 else micro_skill_id
 
 
+def get_next_skill_candidate(micro_skill_id: MicroSkillId) -> MicroSkillId:
+    """Public deterministic helper exposing the next skill in catalogue order."""
+    return _next_skill(micro_skill_id)
+
+
+def get_previous_skill_candidate(micro_skill_id: MicroSkillId) -> MicroSkillId:
+    """Public deterministic helper exposing the previous skill in catalogue order."""
+    return _previous_skill(micro_skill_id)
+
+
 def evaluate_progression(
     child_id: str,
     micro_skill_id: MicroSkillId,

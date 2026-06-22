@@ -21,6 +21,7 @@
 #
 # Task constraints:
 # - Ground every statement in provided worksheet history and scores.
+# - Do not restate percentages or raw numbers inside `summary_el`; keep it qualitative.
 # - Do not mention skills that are absent from provided history/options.
 # - Suggestions must be incremental and practical for the next worksheet.
 # - Keep suggestions advisory (parent can override).

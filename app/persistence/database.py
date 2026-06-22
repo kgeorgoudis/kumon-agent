@@ -35,6 +35,11 @@ from app.domain.models import (
     ProgressWorksheetPoint,
     ProgressDecision,
     ScoreResultSnapshot,
+    TutorStepStatus,
+    TutorStepTrace,
+    TutorTaskState,
+    TutorTaskStatus,
+    TutorTaskType,
     WorksheetInstance,
     WorksheetType,
 )
@@ -201,6 +206,39 @@ CREATE TABLE IF NOT EXISTS progress_decisions (
 
 CREATE INDEX IF NOT EXISTS idx_progress_decisions_child_skill
     ON progress_decisions (child_id, from_micro_skill_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS agent_runs (
+    task_id                   TEXT PRIMARY KEY,
+    task_type                 TEXT NOT NULL,
+    child_id                  TEXT,
+    prompt_version            TEXT NOT NULL,
+    status                    TEXT NOT NULL,
+    deterministic_context_json TEXT NOT NULL,
+    model_context_json        TEXT NOT NULL,
+    output_json               TEXT NOT NULL,
+    error_code                TEXT,
+    created_at                TEXT NOT NULL,
+    updated_at                TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_runs_child_time
+    ON agent_runs (child_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS agent_step_runs (
+    step_id                   TEXT PRIMARY KEY,
+    task_id                   TEXT NOT NULL,
+    step_name                 TEXT NOT NULL,
+    status                    TEXT NOT NULL,
+    input_snapshot_json       TEXT NOT NULL,
+    output_snapshot_json      TEXT NOT NULL,
+    error_code                TEXT,
+    started_at                TEXT NOT NULL,
+    finished_at               TEXT,
+    FOREIGN KEY (task_id) REFERENCES agent_runs(task_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_step_runs_task_time
+    ON agent_step_runs (task_id, started_at ASC);
 
 """
 
@@ -786,6 +824,33 @@ class Database:
             created_at=datetime.fromisoformat(row["created_at"]),
         )
 
+    def get_latest_score_snapshot_for_submission(
+        self,
+        submission_id: str,
+    ) -> ScoreResultSnapshot | None:
+        """Return the most recent score snapshot for a confirmed manual submission."""
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM score_result_snapshots
+                WHERE submission_id = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (submission_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return ScoreResultSnapshot(
+            score_result_id=row["score_result_id"],
+            instance_id=row["instance_id"],
+            submission_id=row["submission_id"],
+            input_hash=row["input_hash"],
+            accuracy_pct=row["accuracy_pct"],
+            details_json=row["details_json"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+        )
+
 
     def list_unscored_confirmed_submissions(
         self, child_id: str | None = None
@@ -891,6 +956,124 @@ class Database:
             parent_override=bool(row["parent_override"]),
             override_note=row["override_note"],
         )
+
+    def save_agent_run(self, run: TutorTaskState) -> None:
+        """Insert or update one tutor task run record."""
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO agent_runs
+                    (task_id, task_type, child_id, prompt_version, status,
+                     deterministic_context_json, model_context_json, output_json,
+                     error_code, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(task_id) DO UPDATE SET
+                    status = excluded.status,
+                    deterministic_context_json = excluded.deterministic_context_json,
+                    model_context_json = excluded.model_context_json,
+                    output_json = excluded.output_json,
+                    error_code = excluded.error_code,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    run.task_id,
+                    run.task_type.value,
+                    run.child_id,
+                    run.prompt_version,
+                    run.status.value,
+                    json.dumps(run.deterministic_context, ensure_ascii=False),
+                    json.dumps(run.model_context, ensure_ascii=False),
+                    json.dumps(run.output, ensure_ascii=False),
+                    run.error_code,
+                    _iso(run.created_at),
+                    _iso(run.updated_at),
+                ),
+            )
+
+    def get_agent_run(self, task_id: str) -> TutorTaskState | None:
+        """Return one tutor task run by id."""
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM agent_runs WHERE task_id = ?",
+                (task_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return TutorTaskState(
+            task_id=row["task_id"],
+            task_type=TutorTaskType(row["task_type"]),
+            child_id=row["child_id"],
+            prompt_version=row["prompt_version"],
+            status=TutorTaskStatus(row["status"]),
+            deterministic_context=json.loads(row["deterministic_context_json"]),
+            model_context=json.loads(row["model_context_json"]),
+            output=json.loads(row["output_json"]),
+            error_code=row["error_code"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+
+    def save_agent_step_run(self, step: TutorStepTrace) -> None:
+        """Insert or update one tutor step trace row."""
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO agent_step_runs
+                    (step_id, task_id, step_name, status,
+                     input_snapshot_json, output_snapshot_json, error_code,
+                     started_at, finished_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(step_id) DO UPDATE SET
+                    status = excluded.status,
+                    output_snapshot_json = excluded.output_snapshot_json,
+                    error_code = excluded.error_code,
+                    finished_at = excluded.finished_at
+                """,
+                (
+                    step.step_id,
+                    step.task_id,
+                    step.step_name,
+                    step.status.value,
+                    json.dumps(step.input_snapshot, ensure_ascii=False),
+                    json.dumps(step.output_snapshot, ensure_ascii=False),
+                    step.error_code,
+                    _iso(step.started_at),
+                    _iso(step.finished_at) if step.finished_at else None,
+                ),
+            )
+
+    def list_agent_step_runs(self, task_id: str) -> list[TutorStepTrace]:
+        """Return all step traces for one task in chronological order."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM agent_step_runs
+                WHERE task_id = ?
+                ORDER BY started_at ASC
+                """,
+                (task_id,),
+            ).fetchall()
+        traces: list[TutorStepTrace] = []
+        for row in rows:
+            traces.append(
+                TutorStepTrace(
+                    step_id=row["step_id"],
+                    task_id=row["task_id"],
+                    step_name=row["step_name"],
+                    status=TutorStepStatus(row["status"]),
+                    input_snapshot=json.loads(row["input_snapshot_json"]),
+                    output_snapshot=json.loads(row["output_snapshot_json"]),
+                    error_code=row["error_code"],
+                    started_at=datetime.fromisoformat(row["started_at"]),
+                    finished_at=(
+                        datetime.fromisoformat(row["finished_at"])
+                        if row["finished_at"]
+                        else None
+                    ),
+                )
+            )
+        return traces
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
