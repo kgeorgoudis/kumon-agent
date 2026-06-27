@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Generator
 
@@ -224,6 +224,12 @@ CREATE TABLE IF NOT EXISTS agent_runs (
 CREATE INDEX IF NOT EXISTS idx_agent_runs_child_time
     ON agent_runs (child_id, created_at DESC);
 
+CREATE INDEX IF NOT EXISTS idx_agent_runs_status_time
+    ON agent_runs (status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_agent_runs_type_time
+    ON agent_runs (task_type, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS agent_step_runs (
     step_id                   TEXT PRIMARY KEY,
     task_id                   TEXT NOT NULL,
@@ -239,6 +245,7 @@ CREATE TABLE IF NOT EXISTS agent_step_runs (
 
 CREATE INDEX IF NOT EXISTS idx_agent_step_runs_task_time
     ON agent_step_runs (task_id, started_at ASC);
+
 
 """
 
@@ -592,7 +599,7 @@ class Database:
             )
         return points
 
-    # ── Manual submission ─────────────────────────────────────────────────────
+    # ── Manual submission ────────────────────────────────────────────────��────
 
     def save_manual_submission(self, submission: ManualSubmission) -> None:
         with self.connect() as conn:
@@ -1041,6 +1048,55 @@ class Database:
                     _iso(step.finished_at) if step.finished_at else None,
                 ),
             )
+
+    def list_agent_runs(
+        self,
+        *,
+        status: TutorTaskStatus | None = None,
+        task_type: TutorTaskType | None = None,
+        hours: int | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict[str, object]]:
+        """Return run summaries with optional filtering by status/type/time window."""
+        clauses: list[str] = []
+        params: list[object] = []
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status.value)
+        if task_type is not None:
+            clauses.append("task_type = ?")
+            params.append(task_type.value)
+        if hours is not None:
+            clauses.append("created_at >= ?")
+            params.append(_iso(datetime.now(timezone.utc) - timedelta(hours=hours)))
+
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.extend([limit, offset])
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT task_id, task_type, status, prompt_version, error_code, created_at, updated_at
+                FROM agent_runs{where}
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                params,
+            ).fetchall()
+
+        return [
+            {
+                "task_id": row["task_id"],
+                "task_type": row["task_type"],
+                "status": row["status"],
+                "prompt_version": row["prompt_version"],
+                "error_code": row["error_code"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ]
+
 
     def list_agent_step_runs(self, task_id: str) -> list[TutorStepTrace]:
         """Return all step traces for one task in chronological order."""

@@ -23,6 +23,17 @@ Usage examples
   kumon profile list
   kumon history
 
+Trace inspection (Constitutional Principle XII):
+  kumon traces list                              # All recent runs (last 24h)
+  kumon traces list --status DEGRADED            # Degraded runs only
+  kumon traces list --status FAILED              # Failed runs only
+  kumon traces list --type PROGRESS_REPORT       # Filter by task type
+  kumon traces list --hours 6 --limit 10         # Last 6 hours, max 10 results
+  kumon traces list --json                       # Machine-readable JSON output
+  kumon traces filter --status DEGRADED --type WORKSHEET_REVIEW
+  kumon traces show <task_id>                    # Run summary + step timeline
+  kumon traces show <task_id> --json             # Full JSON trace detail
+
 Constitutional Principles encoded here:
   IX  — CLI and web call the same service layer (app/services/).
   X   — `kumon explain` makes Kumon documentation available from the CLI.
@@ -32,13 +43,13 @@ Constitutional Principles encoded here:
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
 from typing import Annotated, Optional
 
 import typer
-from rich import print as rprint
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -47,6 +58,7 @@ import app.config as cfg
 from app.domain.knowledge_base import KumonKnowledgeBase
 from app.domain.math_engine import supported_micro_skills
 from app.domain.models import ChildProfile, ManualEntryMode, MicroSkillId, WorksheetType
+from app.observability.service import TraceService
 from app.persistence.database import default_db
 from app.services.submission_service import (
     AnswerCountMismatchError,
@@ -71,7 +83,7 @@ from app.services.submission_service import (
 from app.services.progress_summary_service import build_progress_report
 from app.services.worksheet_generator import generate_worksheet
 
-# ── Typer app ─────────────────────────────────────────────────────────────────
+# ── Typer app ────────────────────────────────────────────────────────────────
 
 app = typer.Typer(
     name="kumon",
@@ -96,13 +108,24 @@ explain_app = typer.Typer(
         "the method, skills, and progression rules.[/dim]"
     )
 )
+traces_app = typer.Typer(
+    help=(
+        "Inspect persisted tutor task traces (Constitutional Principle XII).\n\n"
+        "[dim]Every tutor orchestration run is persisted locally in SQLite. "
+        "Use these commands to list runs, inspect step timelines, diagnose degraded or "
+        "failed outcomes, and confirm fallback paths.\n\n"
+        "Available subcommands: list, filter, show[/dim]"
+    )
+)
 
 app.add_typer(profile_app, name="profile")
 app.add_typer(explain_app, name="explain")
+app.add_typer(traces_app, name="traces")
+
+trace_service = TraceService(db=default_db)
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
+# ── Helpers ─────────────────────────────────────────────────────────────────
 
 def _resolve_child(child_name: str | None, child_id: str | None) -> ChildProfile | None:
     """Try to load a child profile from the DB; create a transient one if not found."""
@@ -230,6 +253,10 @@ def generate(
         console.print(f"[yellow]Warning: could not save to database: {exc}[/yellow]")
 
     # ── Output summary ────────────────────────────────────────────────────────
+    if not instance.html_path or not instance.answer_key_path:
+        console.print("[yellow]Warning: worksheet files were not generated; skipping browser output.[/yellow]")
+        return
+
     ws_path = Path(instance.html_path)
     key_path = Path(instance.answer_key_path)
 
@@ -663,7 +690,8 @@ def submit(
         console.print(f"[red]{code}[/red]: {exc}")
         raise typer.Exit(1)
 
-    # ── Display results ───────────────────────────────────────────────────────
+    # ── Display results ──────────────────────────────────────────────────────
+
     time_line = (
         f"\n[bold]Χρόνος:[/bold]          {_format_duration(outcome.duration_seconds)}"
         if outcome.duration_seconds is not None
@@ -870,6 +898,113 @@ def rescore_command(
         console.print(f"\n[red]{failed} αποτυχίες.[/red] Εκτελέστε ξανά ή ελέγξτε τα logs.")
         raise typer.Exit(1)
     console.print(f"\n[green]✓ {ok} snapshots δημιουργήθηκαν επιτυχώς.[/green]")
+
+
+@traces_app.command("show")
+def show_trace(
+    task_id: Annotated[str, typer.Argument(help="Task ID to inspect.")],
+    json_output: Annotated[bool, typer.Option("--json", help="Print machine-readable JSON instead of the rich summary.")] = False,
+) -> None:
+    """Show one persisted tutor task run and its ordered step timeline."""
+    details = trace_service.get_run_details(task_id, include_full=True)
+    if details is None:
+        console.print(f"[red]No trace found for task_id={task_id!r}[/red]")
+        raise typer.Exit(1)
+
+    if json_output:
+        console.print(json.dumps(details, ensure_ascii=False, indent=2))
+        return
+
+    console.print(
+        Panel(
+            f"[bold]Task ID:[/bold] {details['task_id']}\n"
+            f"[bold]Task Type:[/bold] {details['task_type']}\n"
+            f"[bold]Status:[/bold] {details['status']}\n"
+            f"[bold]Prompt:[/bold] {details['prompt_version']}\n"
+            f"[bold]Error:[/bold] {details['error_code'] or '—'}",
+            title="Tutor Run",
+            border_style="blue",
+        )
+    )
+
+    table = Table(title="Step Timeline", show_header=True, header_style="bold cyan")
+    table.add_column("Step")
+    table.add_column("Status")
+    table.add_column("Started")
+    table.add_column("Finished")
+    for step in details.get("steps", []):
+        table.add_row(
+            step.get("step_name", "—"),
+            step.get("status", "—"),
+            step.get("started_at", "—"),
+            step.get("finished_at") or "—",
+        )
+    console.print(table)
+
+
+@traces_app.command("list")
+def list_traces_cmd(
+    status: Annotated[str | None, typer.Option("--status", help="Filter by task status.")] = None,
+    task_type: Annotated[str | None, typer.Option("--type", help="Filter by task type.")] = None,
+    hours: Annotated[int | None, typer.Option("--hours", help="Only include runs from the last N hours.")] = None,
+    limit: Annotated[int, typer.Option("--limit", help="Maximum number of runs to show.")] = 20,
+    offset: Annotated[int, typer.Option("--offset", help="Number of runs to skip before rendering the page.")] = 0,
+    json_output: Annotated[bool, typer.Option("--json", help="Print machine-readable JSON instead of the rich summary.")] = False,
+) -> None:
+    """List recent tutor task runs with optional filters."""
+    runs = trace_service.list_runs(
+        status=status,
+        task_type=task_type,
+        hours=hours,
+        limit=limit,
+        offset=offset,
+    )
+
+    if json_output:
+        console.print(json.dumps({"runs": runs}, ensure_ascii=False, indent=2))
+        return
+
+    if not runs:
+        console.print("[yellow]No trace runs found.[/yellow]")
+        return
+
+    table = Table(title="Recent Tutor Runs", show_header=True, header_style="bold green")
+    table.add_column("Task ID")
+    table.add_column("Type")
+    table.add_column("Status")
+    table.add_column("Prompt")
+    table.add_column("Error")
+    table.add_column("Created")
+    for run in runs:
+        table.add_row(
+            str(run["task_id"]),
+            str(run["task_type"]),
+            str(run["status"]),
+            str(run.get("prompt_version", "—")),
+            str(run.get("error_code") or "—"),
+            str(run.get("created_at", "—")),
+        )
+    console.print(table)
+
+
+@traces_app.command("filter")
+def filter_traces_cmd(
+    status: Annotated[str | None, typer.Option("--status", help="Filter by task status.")] = None,
+    task_type: Annotated[str | None, typer.Option("--type", help="Filter by task type.")] = None,
+    hours: Annotated[int | None, typer.Option("--hours", help="Only include runs from the last N hours.")] = None,
+    limit: Annotated[int, typer.Option("--limit", help="Maximum number of runs to show.")] = 20,
+    offset: Annotated[int, typer.Option("--offset", help="Number of runs to skip before rendering the page.")] = 0,
+    json_output: Annotated[bool, typer.Option("--json", help="Print machine-readable JSON instead of the rich summary.")] = False,
+) -> None:
+    """Alias for `traces list` with the same filter options."""
+    list_traces_cmd(
+        status=status,
+        task_type=task_type,
+        hours=hours,
+        limit=limit,
+        offset=offset,
+        json_output=json_output,
+    )
 
 
 if __name__ == "__main__":

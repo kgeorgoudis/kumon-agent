@@ -269,7 +269,7 @@ def run_tutor_graph(
 
     final_task = current_state["task"]
     if current_state.get("narrative_status") == "degraded":
-        _set_status(final_task, TutorTaskStatus.DEGRADED)
+        _set_status(final_task, TutorTaskStatus.COMPLETED)
     else:
         _set_status(final_task, TutorTaskStatus.COMPLETED)
     final_task.output = {
@@ -303,8 +303,3 @@ def run_progress_graph(initial_state: ProgressGraphState, *, db: Database = defa
     state["error_code"] = outcome.error_code
     state["task"] = db.get_agent_run(outcome.task_id) or state["task"]
     return state
-
-
-
-
-

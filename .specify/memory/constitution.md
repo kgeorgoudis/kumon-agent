@@ -1,17 +1,16 @@
 <!--
 Sync Impact Report
 ==================
-- Version change: 1.0.0 → 1.1.0
+- Version change: 1.1.0 → 1.2.0
 - Modified principles:
-  - I. Deterministic Before Agentic (clarified: agentic tasks operate under the
-    Kumon Tutor Persona defined in Principle XI)
+  - III. Inspectable Progression → III. Inspectable Progression Decisions
 - Added sections:
-  - XI. Kumon Tutor Persona (new principle)
+  - XII. Agent Observability and Traceability (new principle)
 - Removed sections: None
 - Templates requiring updates:
-  - .specify/templates/plan-template.md ⚠ Not present in repo (no change applied)
-  - .specify/templates/spec-template.md ⚠ Not present in repo (no change applied)
-  - .specify/templates/tasks-template.md ⚠ Not present in repo (no change applied)
+  - .specify/templates/plan-template.md ✅ reviewed (no change required)
+  - .specify/templates/spec-template.md ✅ reviewed (no change required)
+  - .specify/templates/tasks-template.md ✅ reviewed (no change required)
 - Follow-up TODOs: None
 -->
 
@@ -38,7 +37,7 @@ be computed by Python code—never by the LLM. The scoring engine MUST
 produce identical results given identical inputs regardless of whether an
 LLM is available. Unit tests MUST cover all arithmetic paths.
 
-### III. Inspectable Progression
+### III. Inspectable Progression Decisions
 
 Every progression decision (advance, stay, step-back) MUST produce a
 machine-readable explanation that a parent can review. Decisions MUST
@@ -142,6 +141,28 @@ Persona constraints (non-negotiable):
 - Persona behavior MUST be exercised by tests where feasible (structured
   prompt inputs/outputs), and prompt outputs SHOULD be structured JSON.
 
+### XII. Agent Observability and Traceability
+
+Every agent task run MUST emit structured lifecycle traces that allow a
+developer or parent-facing operator to answer: what deterministic inputs were
+provided, which step/tool executed, what output was produced, and why fallback
+or degradation occurred.
+
+Observability requirements (non-negotiable):
+
+- Each run MUST have a stable task identifier and step-level trace records with
+  status transitions (`initialized`, `grounding`, `reasoning`, `validating`,
+  `completed`, `degraded`, `failed`) and timestamps.
+- Agent traces MUST capture prompt version, deterministic context snapshot,
+  tool calls, and sanitized output summary. They MUST NOT log raw secrets or
+  unnecessary child PII.
+- On LLM/tool failure, the system MUST record a machine-readable error code and
+  fallback path so degraded outcomes are inspectable, reproducible, and testable.
+- CLI and web surfaces MUST expose trace summaries for debugging and support,
+  while retaining deterministic operation when full traces are unavailable.
+- Tests MUST cover at least one successful and one degraded path per agent task
+  type, asserting trace persistence and error-code propagation.
+
 ## Technology & Architecture Constraints
 
 - **Language**: Python ≥ 3.12, managed with Astral `uv`.
@@ -153,7 +174,8 @@ Persona constraints (non-negotiable):
 - **Persistence**: SQLite (v1). Append-only event history preferred.
 - **Templating**: Jinja2 for worksheet and UI rendering.
 - **Testing**: pytest. Deterministic tests for all domain logic.
-  Fixture-based tests for OCR and scoring. Greek locale coverage.
+  Fixture-based tests for OCR and scoring. Agent trace coverage for success and
+  degraded paths. Greek locale coverage.
 - **Output**: PDF/HTML worksheets, printable and child-friendly.
 - **OCR**: Pipeline for handwritten worksheet ingestion; designed for
   imperfect results with human review step.
@@ -179,6 +201,9 @@ Persona constraints (non-negotiable):
   secrets in code. Default to local processing.
 - **Audit trail**: Every worksheet generation, submission, score, and
   progression decision MUST be persisted with full linkage.
+- **Agent observability**: Every tutor orchestration run MUST persist run and
+  step traces with status, error codes, prompt version, and deterministic
+  context references (Principle XII).
 
 ## Governance
 
@@ -195,4 +220,4 @@ Persona constraints (non-negotiable):
 - The `AGENTS.md` file provides expanded guidance and is subordinate
   to this constitution. In case of conflict, this constitution wins.
 
-**Version**: 1.1.0 | **Ratified**: 2026-06-14 | **Last Amended**: 2026-06-21
+**Version**: 1.2.0 | **Ratified**: 2026-06-14 | **Last Amended**: 2026-06-27

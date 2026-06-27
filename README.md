@@ -312,7 +312,7 @@ This project follows a [written constitution](.specify/memory/constitution.md):
 
 1. **Deterministic before agentic** — rules in Python, not prompts
 2. **Arithmetic truth from code** — the LLM never computes answers
-3. **Inspectable progression** — every decision has a machine-readable reason
+3. **Inspectable progression decisions** — every progression action is explainable
 4. **Parent override authority** — the parent controls everything
 5. **Paper workflow first** — generate → print → solve → scan → score
 6. **Short and incremental** — 10–15 exercises, one micro-skill at a time
@@ -320,6 +320,8 @@ This project follows a [written constitution](.specify/memory/constitution.md):
 8. **Local-first architecture** — LLM and DB run locally by default
 9. **Shared domain logic** — CLI and web call the same services
 10. **In-app documentation** — Kumon docs accessible from CLI and web
+11. **Kumon tutor persona** — LLM tutoring tasks follow versioned tutor prompts
+12. **Agent observability and traceability** — tutor runs emit inspectable traces
 
 ---
 
@@ -416,3 +418,42 @@ See [README.md](README.md) and `.specify/memory/constitution.md` for deeper cont
 - **v0.2.0 (M2)**: Manual submission workflow → deterministic scoring → progress summary
 - **v0.3.0 (M3)**: Mastery tracking → progression planner → parent dashboard
 - **v0.4.0 (M4)**: LLM-powered explanations in Greek, evaluation harness
+
+### Trace inspection and diagnostics
+
+When tutor orchestration runs are persisted locally, you can inspect and filter them from the CLI or HTTP API:
+
+```bash
+# List recent traces with optional filters
+uv run kumon traces list                                   # All recent runs
+uv run kumon traces list --status DEGRADED                 # Degraded runs only
+uv run kumon traces list --status FAILED                   # Failed runs only
+uv run kumon traces list --type PROGRESS_REPORT            # Filter by task type
+uv run kumon traces list --hours 6 --limit 10              # Last 6 hours, max 10
+uv run kumon traces list --status DEGRADED --json          # Machine-readable JSON
+
+# Advanced filtering with the filter alias
+uv run kumon traces filter --status DEGRADED --type WORKSHEET_REVIEW
+
+# Show a single run and its ordered step timeline
+uv run kumon traces show <task_id>
+uv run kumon traces show <task_id> --json                  # Full JSON trace detail
+```
+
+The same data is available from the local API (when the server is running):
+
+```bash
+# Start the API server
+uv run uvicorn app.api:api --reload
+
+# Query via HTTP
+curl "http://127.0.0.1:8000/api/v1/traces"
+curl "http://127.0.0.1:8000/api/v1/traces?status=DEGRADED&hours=6"
+curl "http://127.0.0.1:8000/api/v1/traces/<task_id>"
+curl "http://127.0.0.1:8000/api/v1/traces/<task_id>/steps"
+```
+
+Traces are sanitized at write time and **never** contain child PII, full LLM prompts, or secrets.
+See [`specs/008-agent-observability/quickstart.md`](specs/008-agent-observability/quickstart.md) for full operator documentation including error code reference and troubleshooting.
+
+---
