@@ -46,6 +46,27 @@ def test_generates_exact_count(count: int):
     assert len(exercises) == count
 
 
+def test_unique_mode_avoids_duplicate_problem_texts():
+    exercises = generate_exercises(
+        MicroSkillId.MULTIPLICATION_2_5,
+        count=30,
+        seed=11,
+        unique=True,
+    )
+    problems = [ex.problem_text for ex in exercises]
+    assert len(problems) == len(set(problems))
+
+
+def test_unique_mode_raises_when_count_is_not_feasible():
+    with pytest.raises(ValueError, match="Could not generate .* unique exercises"):
+        generate_exercises(
+            MicroSkillId.DIVISION_2_5,
+            count=41,
+            seed=1,
+            unique=True,
+        )
+
+
 # ── Arithmetic correctness ────────────────────────────────────────────────────
 # All arithmetic answers must be correct Python integers — never LLM output.
 

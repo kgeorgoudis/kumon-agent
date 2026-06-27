@@ -137,7 +137,7 @@ def generate_worksheet(
         seed = random.randint(0, 2**31)
 
     # Generate exercises — pure Python, no LLM
-    exercises = generate_exercises(micro_skill_id, count=count, seed=seed)
+    exercises = generate_exercises(micro_skill_id, count=count, seed=seed, unique=True)
 
     # Fetch display strings
     title_el = _TITLE_EL.get(micro_skill_id, micro_skill_id.value.replace("_", " ").title())

@@ -247,6 +247,7 @@ def generate_exercises(
     micro_skill_id: MicroSkillId,
     count: int = 15,
     seed: int | None = None,
+    unique: bool = False,
 ) -> list[Exercise]:
     """
     Generate a deterministic list of exercises for the given micro-skill.
@@ -260,6 +261,8 @@ def generate_exercises(
     seed:
         Random seed for reproducibility.  If None, a random seed is used and
         recorded in the returned WorksheetInstance so the sheet can be regenerated.
+    unique:
+        If True, avoid duplicate problem statements within the returned list.
 
     Returns
     -------
@@ -281,7 +284,29 @@ def generate_exercises(
 
     rng = random.Random(seed)
     generator = _GENERATORS[micro_skill_id]
-    return [generator(rng) for _ in range(count)]
+
+    if not unique:
+        return [generator(rng) for _ in range(count)]
+
+    exercises: list[Exercise] = []
+    seen_problem_texts: set[str] = set()
+    max_attempts_per_slot = 200
+
+    for _ in range(count):
+        for _attempt in range(max_attempts_per_slot):
+            exercise = generator(rng)
+            if exercise.problem_text not in seen_problem_texts:
+                seen_problem_texts.add(exercise.problem_text)
+                exercises.append(exercise)
+                break
+        else:
+            skill_name = getattr(micro_skill_id, "value", str(micro_skill_id))
+            raise ValueError(
+                f"Could not generate {count} unique exercises for micro-skill '{skill_name}'. "
+                "Try a smaller exercise count."
+            )
+
+    return exercises
 
 
 def supported_micro_skills() -> list[MicroSkillId]:

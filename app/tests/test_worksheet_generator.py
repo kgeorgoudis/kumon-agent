@@ -70,6 +70,12 @@ def test_reproducible_with_same_seed(tmp_output):
     assert [ex.problem_text for ex in a.exercises] == [ex.problem_text for ex in b.exercises]
 
 
+def test_generated_worksheet_has_unique_exercises(tmp_output):
+    instance = generate_worksheet(MicroSkillId.MULTIPLICATION_2_5, count=30, seed=21)
+    problems = [ex.problem_text for ex in instance.exercises]
+    assert len(problems) == len(set(problems))
+
+
 # ── File output ───────────────────────────────────────────────────────────────
 
 
