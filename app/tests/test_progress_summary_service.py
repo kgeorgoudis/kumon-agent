@@ -141,8 +141,9 @@ def test_build_progress_report_llm_unavailable_fallback(monkeypatch, db: Databas
 
 def test_load_progress_prompt_includes_kumon_tutor_persona():
     prompt = load_progress_prompt()
-    assert "Prompt: kumon_tutor_persona - v1" in prompt
+    # Version-agnostic: check for content that exists in all persona versions
     assert "έμπειρος/η εκπαιδευτικός Kumon" in prompt
+    assert "kumon_tutor_persona" in prompt
 
 
 def test_build_progress_report_invalid_worksheet_type_is_sanitized(monkeypatch, db: Database, tmp_output, make_fake_llm_client):

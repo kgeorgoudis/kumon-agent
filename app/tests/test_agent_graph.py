@@ -120,7 +120,7 @@ def test_progress_graph_repeatable_step_order(monkeypatch, db: Database, tmp_out
     first = build_progress_report(child=child, include_narrative=True, db=db)
     second = build_progress_report(child=child, include_narrative=True, db=db)
 
-    assert first.prompt_version == second.prompt_version == "v1/progress_summary"
+    assert first.prompt_version == second.prompt_version == f"{cfg.PROMPT_VERSION}/progress_summary"
     assert first.trace_summary["step_names"] == second.trace_summary["step_names"] == [
         "grounding",
         "reasoning",
@@ -128,3 +128,94 @@ def test_progress_graph_repeatable_step_order(monkeypatch, db: Database, tmp_out
     ]
 
 
+def test_validation_degrades_on_empty_summary(monkeypatch, db: Database, tmp_output, child: ChildProfile, make_fake_llm_client):
+    """Empty summary_el triggers ERR_LLM_EMPTY_SUMMARY and graceful degradation."""
+    _seed_progress(db, child, 2001)
+
+    # LLM returns valid JSON but an empty summary
+    fake_json = (
+        '{"summary_el": "   ",'
+        '"suggestions":[{"target_micro_skill_id":"addition_single_digit",'
+        '"suggested_worksheet_type":"drill",'
+        '"rationale_el":"Συνέχισε.",'
+        '"confidence":"medium"}]}'
+    )
+    monkeypatch.setattr("app.agents.agent_graph.get_llm_client", lambda: make_fake_llm_client(fake_json))
+
+    from app.services.progress_summary_service import build_progress_report
+
+    report = build_progress_report(child=child, include_narrative=True, db=db)
+
+    assert report.narrative_status == "degraded"
+    assert report.llm_error_code == "ERR_LLM_EMPTY_SUMMARY"
+    # Fallback summary must still be present
+    assert report.summary_el
+
+
+def test_validation_degrades_on_english_language_response(monkeypatch, db: Database, tmp_output, child: ChildProfile, make_fake_llm_client):
+    """English-language summary_el triggers ERR_LLM_WRONG_LANGUAGE and graceful degradation."""
+    _seed_progress(db, child, 2002)
+
+    # LLM responds in English instead of Greek
+    fake_json = (
+        '{"summary_el": "The child is making good progress and is improving steadily.",'
+        '"suggestions":[{"target_micro_skill_id":"addition_single_digit",'
+        '"suggested_worksheet_type":"drill",'
+        '"rationale_el":"Continue with short worksheets for the skill.",'
+        '"confidence":"medium"}]}'
+    )
+    monkeypatch.setattr("app.agents.agent_graph.get_llm_client", lambda: make_fake_llm_client(fake_json))
+
+    from app.services.progress_summary_service import build_progress_report
+
+    report = build_progress_report(child=child, include_narrative=True, db=db)
+
+    assert report.narrative_status == "degraded"
+    assert report.llm_error_code == "ERR_LLM_WRONG_LANGUAGE"
+    assert report.summary_el  # fallback summary present
+
+
+def test_call_llm_retries_once_on_invalid_json(monkeypatch, db: Database, tmp_output, child: ChildProfile):
+    """On first invalid JSON, _call_llm retries once and succeeds on second attempt."""
+    _seed_progress(db, child, 2003)
+
+    call_count = {"n": 0}
+    good_json = (
+        '{"summary_el":"Καλή πρόοδος.",'
+        '"suggestions":[{"target_micro_skill_id":"addition_single_digit",'
+        '"suggested_worksheet_type":"drill",'
+        '"rationale_el":"Συνέχισε.",'
+        '"confidence":"high"}]}'
+    )
+
+    class _FakeChoice:
+        message = type("M", (), {"content": ""})()
+        finish_reason = "stop"
+
+    class _FakeResponse:
+        choices = [_FakeChoice()]
+
+    class _FakeClient:
+        def chat(self):
+            pass
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            call_count["n"] += 1
+            resp = _FakeResponse()
+            if call_count["n"] == 1:
+                resp.choices[0].message.content = "not valid json at all"
+            else:
+                resp.choices[0].message.content = good_json
+            return resp
+
+    fake_client = type("C", (), {"chat": type("CH", (), {"completions": _FakeCompletions()})()})()
+    monkeypatch.setattr("app.agents.agent_graph.get_llm_client", lambda: fake_client)
+
+    from app.services.progress_summary_service import build_progress_report
+
+    report = build_progress_report(child=child, include_narrative=True, db=db)
+
+    assert call_count["n"] == 2, "Expected exactly one retry (2 total calls)"
+    assert report.narrative_status == "generated"
+    assert report.llm_error_code is None

@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+import app.config as cfg
 from app.agents.agent_graph import ProgressGraphState, create_progress_task, run_progress_graph
 from app.agents.state import TutorTaskStatus
 from app.persistence.database import Database
@@ -17,7 +18,7 @@ def db(tmp_path: Path) -> Database:
 def test_create_progress_task_defaults_prompt_version():
     task = create_progress_task(child_id="child-123")
     assert task.task_type.value == "progress_report"
-    assert task.prompt_version == "v1/progress_summary"
+    assert task.prompt_version == f"{cfg.PROMPT_VERSION}/progress_summary"
     assert task.child_id == "child-123"
 
 

@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+import app.config as cfg
 from app.agents.traces import list_task_traces, persist_step_finish, persist_step_start
 from app.agents.state import TutorStepStatus
 from app.persistence.database import Database
@@ -65,6 +66,6 @@ def test_agent_run_can_be_reloaded_with_prompt_version(db: Database):
 
     loaded = db.get_agent_run(outcome.task_id)
     assert loaded is not None
-    assert loaded.prompt_version == "v1/progress_summary"
+    assert loaded.prompt_version == f"{cfg.PROMPT_VERSION}/progress_summary"
 
 

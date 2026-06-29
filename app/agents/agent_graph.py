@@ -22,6 +22,7 @@ from app.persistence.database import Database, default_db
 
 _ALLOWED_WORKSHEET_TYPES = {"drill", "mixed_review", "correction", "concept_reinforcement", "timed_fluency"}
 _DIGIT_RE = re.compile(r"\d")
+_ENGLISH_STOP_RE = re.compile(r"\b(the|is|and|for|of|that|with|are)\b", re.IGNORECASE)
 
 
 def _now() -> datetime:
@@ -46,13 +47,21 @@ class ProgressGraphState(TypedDict, total=False):
     error_code: str | None
 
 
+_THINK_BLOCK_RE = re.compile(r"<think>[\s\S]*?</think>", re.DOTALL)
+_JSON_OBJECT_RE = re.compile(r"\{[\s\S]*\}", re.DOTALL)
+
+
 def _extract_json_block(raw_text: str) -> dict[str, object]:
-    candidate = raw_text.strip()
+    # 1. Strip <think>…</think> blocks emitted by Qwen3 models
+    candidate = _THINK_BLOCK_RE.sub("", raw_text).strip()
+    # 2. Strip markdown code fences if present
     if candidate.startswith("```"):
-        candidate = candidate.strip("`")
-        if candidate.startswith("json"):
-            candidate = candidate[4:]
-    return json.loads(candidate.strip())
+        candidate = re.sub(r"^```[a-z]*\n?", "", candidate).rstrip("`").strip()
+    # 3. Find the outermost JSON object regardless of surrounding prose
+    m = _JSON_OBJECT_RE.search(candidate)
+    if m:
+        candidate = m.group(0)
+    return json.loads(candidate)
 
 
 def _call_llm(task_type: TutorTaskType, payload: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
@@ -60,30 +69,38 @@ def _call_llm(task_type: TutorTaskType, payload: dict[str, Any]) -> tuple[dict[s
     prompt = f"{persona}\n\n{task_prompt}"
     no_think_suffix = "" if cfg.LLM_THINKING_ENABLED else " /no_think"
     user_content = "Παράθεσε ΜΟΝΟ έγκυρο JSON με βάση τα ντετερμινιστικά δεδομένα:" + no_think_suffix + "\n" + json.dumps(payload, ensure_ascii=False)
-    try:
-        response = get_llm_client().chat.completions.create(
-            model=cfg.LLM_MODEL,
-            temperature=0.2,
-            max_tokens=cfg.LLM_MAX_TOKENS,
-            messages=[
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": user_content},
-            ],
-        )
-    except Exception:
-        return None, "ERR_LLM_UNAVAILABLE"
 
-    content = ""
-    finish_reason = None
-    if response.choices:
-        content = response.choices[0].message.content or ""
-        finish_reason = getattr(response.choices[0], "finish_reason", None)
-    if finish_reason == "length":
-        return None, "ERR_LLM_TRUNCATED"
-    try:
-        return _extract_json_block(content), None
-    except Exception:
-        return None, "ERR_LLM_INVALID_JSON"
+    def _single_attempt() -> tuple[dict[str, Any] | None, str | None]:
+        try:
+            response = get_llm_client().chat.completions.create(
+                model=cfg.LLM_MODEL,
+                temperature=0.2,
+                max_tokens=cfg.LLM_MAX_TOKENS,
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": user_content},
+                ],
+            )
+        except Exception:
+            return None, "ERR_LLM_UNAVAILABLE"
+
+        content = ""
+        finish_reason = None
+        if response.choices:
+            content = response.choices[0].message.content or ""
+            finish_reason = getattr(response.choices[0], "finish_reason", None)
+        if finish_reason == "length":
+            return None, "ERR_LLM_TRUNCATED"
+        try:
+            return _extract_json_block(content), None
+        except Exception:
+            return None, "ERR_LLM_INVALID_JSON"
+
+    result, error_code = _single_attempt()
+    # Single automatic retry on invalid JSON (transient sampling failures)
+    if result is None and error_code == "ERR_LLM_INVALID_JSON":
+        result, error_code = _single_attempt()
+    return result, error_code
 
 
 def _normalize_suggestions(raw: list[object], known_skills: set[str]) -> list[dict[str, Any]]:
@@ -175,8 +192,19 @@ def _validation_node(state: ProgressGraphState) -> ProgressGraphState:
 
     if state.get("narrative_status") == "generated" and task.task_type == TutorTaskType.PROGRESS_REPORT:
         summary = state.get("summary_el") or ""
-        if not summary or _DIGIT_RE.search(summary):
+        # Guard: empty or whitespace-only summary
+        if not summary.strip():
+            state["error_code"] = "ERR_LLM_EMPTY_SUMMARY"
+            _build_progress_fallback(state)
+            return state
+        # Guard: raw digits in summary (conflicting facts)
+        if _DIGIT_RE.search(summary):
             state["error_code"] = "ERR_LLM_CONFLICTING_FACTS"
+            _build_progress_fallback(state)
+            return state
+        # Guard: English-language response
+        if _ENGLISH_STOP_RE.search(summary):
+            state["error_code"] = "ERR_LLM_WRONG_LANGUAGE"
             _build_progress_fallback(state)
             return state
         if not state.get("suggestions"):

@@ -39,7 +39,7 @@ DB_PATH = DATA_DIR / "kumon.db"
 # Constitutional Principle VIII: local-first.
 # The LLM runs locally; no data leaves the machine by default.
 LLM_BASE_URL: str = os.environ.get("KUMON_LLM_BASE_URL", "http://127.0.0.1:8000/v1")
-LLM_MODEL: str = os.environ.get("KUMON_LLM_MODEL", "Qwen3-8B-MLX-4bit")
+LLM_MODEL: str = os.environ.get("KUMON_LLM_MODEL", "Qwen3-4B-MLX-4bit")
 LLM_API_KEY: str = os.environ.get("KUMON_LLM_API_KEY", "local")  # override with KUMON_LLM_API_KEY
 LLM_TIMEOUT: float = float(os.environ.get("KUMON_LLM_TIMEOUT", "30"))
 # Max tokens for LLM completion responses.  500 is too small for Qwen3 (thinking tokens
@@ -48,6 +48,10 @@ LLM_MAX_TOKENS: int = int(os.environ.get("KUMON_LLM_MAX_TOKENS", "1024"))
 # Set KUMON_LLM_THINKING=0 to append /no_think to prompts for Qwen3-style models and
 # suppress chain-of-thought tokens so the full budget is available for JSON output.
 LLM_THINKING_ENABLED: bool = os.environ.get("KUMON_LLM_THINKING", "0") not in {"0", "false", "False"}
+
+# Prompt version — selects the app/prompts/{version}/ directory used for all LLM tasks.
+# Set KUMON_PROMPT_VERSION=v1 to revert to the previous prompt set without any code change.
+PROMPT_VERSION: str = os.environ.get("KUMON_PROMPT_VERSION", "v2")
 
 # ── Worksheet defaults ────────────────────────────────────────────────────────
 DEFAULT_EXERCISE_COUNT: int = int(os.environ.get("KUMON_EXERCISE_COUNT", "15"))
